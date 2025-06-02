@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
+from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 # Load the dataset
 file_path = 'dataset.csv'
@@ -47,17 +49,25 @@ test_loader = DataLoader(test_ds, batch_size=32)
 class SimpleCNN(nn.Module):
     def __init__(self, num_features, num_classes):
         super().__init__()
-        self.conv1 = nn.Conv1d(1, 32, kernel_size=3)
+        self.conv1 = nn.Conv1d(1, 32, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm1d(32)
+        self.conv2 = nn.Conv1d(32, 64, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm1d(64)
         self.flatten = nn.Flatten()
-        self.fc1 = nn.Linear((num_features-2)*32, 64)
-        self.dropout = nn.Dropout(0.3)
-        self.fc2 = nn.Linear(64, num_classes)
+        self.fc1 = nn.Linear(num_features * 64, 128)
+        self.dropout1 = nn.Dropout(0.4)
+        self.fc2 = nn.Linear(128, 64)
+        self.dropout2 = nn.Dropout(0.3)
+        self.fc3 = nn.Linear(64, num_classes)
     def forward(self, x):
-        x = torch.relu(self.conv1(x))
+        x = torch.relu(self.bn1(self.conv1(x)))
+        x = torch.relu(self.bn2(self.conv2(x)))
         x = self.flatten(x)
         x = torch.relu(self.fc1(x))
-        x = self.dropout(x)
-        x = self.fc2(x)
+        x = self.dropout1(x)
+        x = torch.relu(self.fc2(x))
+        x = self.dropout2(x)
+        x = self.fc3(x)
         return x
 
 num_classes = len(np.unique(y))
@@ -66,19 +76,47 @@ model = SimpleCNN(num_features, num_classes)
 
 # Training setup
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
 
 # Training loop
-for epoch in range(20):
+train_losses = []
+train_accuracies = []
+num_epochs = 20
+for epoch in range(num_epochs):
     model.train()
-    for xb, yb in train_loader:
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    for xb, yb in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}"):
         optimizer.zero_grad()
         out = model(xb)
         loss = criterion(out, yb)
         loss.backward()
         optimizer.step()
-    if (epoch+1) % 5 == 0:
-        print(f"Epoch {epoch+1}/20, Loss: {loss.item():.4f}")
+        running_loss += loss.item() * xb.size(0)
+        preds = torch.argmax(out, dim=1)
+        correct += (preds == yb).sum().item()
+        total += yb.size(0)
+    epoch_loss = running_loss / total
+    epoch_acc = correct / total
+    train_losses.append(epoch_loss)
+    train_accuracies.append(epoch_acc)
+    print(f"Epoch {epoch+1}/{num_epochs}, Loss: {epoch_loss:.4f}, Accuracy: {epoch_acc:.4f}")
+
+# Plot learning and accuracy curves
+plt.figure(figsize=(12,5))
+plt.subplot(1,2,1)
+plt.plot(range(1, num_epochs+1), train_losses, marker='o')
+plt.title('Training Loss Curve')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.subplot(1,2,2)
+plt.plot(range(1, num_epochs+1), train_accuracies, marker='o', color='orange')
+plt.title('Training Accuracy Curve')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.tight_layout()
+plt.show()
 
 # Evaluation
 model.eval()
