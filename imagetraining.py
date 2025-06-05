@@ -9,6 +9,8 @@ from sklearn.model_selection import train_test_split
 from torchvision import transforms
 from PIL import Image
 import os
+import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 # Updated image extraction from coordinates
 IMAGE_FOLDER = 'images\\wildfire'
@@ -87,18 +89,23 @@ model = SimpleCNN(num_classes)
 
 # Training setup
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f"Using device: {device}")
 model = model.to(device)
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.5)
 
 # Training loop
+train_losses = []
+train_accuracies = []
+val_losses = []
+val_accuracies = []
 num_epochs = 10
 for epoch in range(num_epochs):
     model.train()
     running_loss = 0.0
     correct = 0
     total = 0
-    for imgs, labels in train_loader:
+    for imgs, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} [Train]"):
         imgs = imgs.to(device)
         labels = labels.to(device).long()
         optimizer.zero_grad()
@@ -110,7 +117,50 @@ for epoch in range(num_epochs):
         _, preds = torch.max(outputs, 1)
         correct += (preds == labels).sum().item()
         total += labels.size(0)
-    print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss/total:.4f}, Acc: {correct/total:.4f}")
+    train_loss = running_loss / total
+    train_acc = correct / total
+    train_losses.append(train_loss)
+    train_accuracies.append(train_acc)
+
+    # Validation
+    model.eval()
+    val_running_loss = 0.0
+    val_correct = 0
+    val_total = 0
+    with torch.no_grad():
+        for imgs, labels in tqdm(test_loader, desc=f"Epoch {epoch+1}/{num_epochs} [Val]"):
+            imgs = imgs.to(device)
+            labels = labels.to(device).long()
+            outputs = model(imgs)
+            loss = criterion(outputs, labels)
+            val_running_loss += loss.item() * imgs.size(0)
+            _, preds = torch.max(outputs, 1)
+            val_correct += (preds == labels).sum().item()
+            val_total += labels.size(0)
+    val_loss = val_running_loss / val_total
+    val_acc = val_correct / val_total
+    val_losses.append(val_loss)
+    val_accuracies.append(val_acc)
+    print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+
+# Plot learning and accuracy curves
+plt.figure(figsize=(12,5))
+plt.subplot(1,2,1)
+plt.plot(range(1, num_epochs+1), train_losses, marker='o', label='Train Loss')
+plt.plot(range(1, num_epochs+1), val_losses, marker='x', label='Val Loss')
+plt.title('Loss Curve')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+plt.subplot(1,2,2)
+plt.plot(range(1, num_epochs+1), train_accuracies, marker='o', label='Train Acc')
+plt.plot(range(1, num_epochs+1), val_accuracies, marker='x', label='Val Acc')
+plt.title('Accuracy Curve')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.tight_layout()
+plt.show()
 
 # Evaluation
 model.eval()
