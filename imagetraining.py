@@ -13,13 +13,16 @@ import os
 # Updated image extraction from coordinates
 IMAGE_FOLDER = 'images\\wildfire'
 def get_image_from_coords(lat, lon):
-    # Format filename as 'lat_lon.jpg' (adjust extension if needed)
     filename = f"{lon},{lat}.jpg"
     filepath = os.path.join(IMAGE_FOLDER, filename)
     if os.path.exists(filepath):
-        return Image.open(filepath).convert('RGB')
+        try:
+            return Image.open(filepath).convert('RGB')
+        except Exception as e:
+            # Error is with image -73.15884,46.38819.jpg
+            print(f"Error loading image {filepath}: {e}. Returning dummy image.")
+            return Image.fromarray(np.uint8(np.random.rand(64, 64, 3) * 255))
     else:
-        # Return a dummy image if not found
         print(f"Image not found for coordinates ({lat}, {lon}). Returning dummy image.")
         return Image.fromarray(np.uint8(np.random.rand(64, 64, 3) * 255))
 
@@ -96,7 +99,8 @@ for epoch in range(num_epochs):
     correct = 0
     total = 0
     for imgs, labels in train_loader:
-        imgs, labels = imgs.to(device), labels.to(device)
+        imgs = imgs.to(device)
+        labels = labels.to(device).long()
         optimizer.zero_grad()
         outputs = model(imgs)
         loss = criterion(outputs, labels)
@@ -113,7 +117,8 @@ model.eval()
 correct = 0
 with torch.no_grad():
     for imgs, labels in test_loader:
-        imgs, labels = imgs.to(device), labels.to(device)
+        imgs = imgs.to(device)
+        labels = labels.to(device).long()
         outputs = model(imgs)
         _, preds = torch.max(outputs, 1)
         correct += (preds == labels).sum().item()
