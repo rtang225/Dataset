@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split, KFold
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import accuracy_score
 from sklearn.utils.class_weight import compute_class_weight
@@ -106,85 +106,56 @@ print(f"Model is on device: {next(model.parameters()).device}")
 criterion = nn.CrossEntropyLoss(weight=class_weights)
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-# Training loop with 3-fold cross-validation
-num_epochs = 50
-kf = KFold(n_splits=3, shuffle=True, random_state=42)
-fold_accuracies = []
-for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
-    print(f"\nFold {fold+1}/3")
-    # Split data for this fold
-    X_train_fold, X_val_fold = X.iloc[train_idx], X.iloc[val_idx]
-    y_train_fold, y_val_fold = y[train_idx], y[val_idx]
-    # Fit scaler and encoder only on training fold
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train_fold)
-    X_val_scaled = scaler.transform(X_val_fold)
-    # Reshape for Conv1D
-    X_train_cnn = X_train_scaled.reshape((X_train_scaled.shape[0], 1, X_train_scaled.shape[1]))
-    X_val_cnn = X_val_scaled.reshape((X_val_scaled.shape[0], 1, X_val_scaled.shape[1]))
-    # Convert to tensors
-    torch_X_train = torch.tensor(X_train_cnn, dtype=torch.float32).to(device)
-    torch_X_val = torch.tensor(X_val_cnn, dtype=torch.float32).to(device)
-    torch_y_train = torch.tensor(y_train_fold, dtype=torch.long).to(device)
-    torch_y_val = torch.tensor(y_val_fold, dtype=torch.long).to(device)
-    train_ds = TensorDataset(torch_X_train, torch_y_train)
-    val_ds = TensorDataset(torch_X_val, torch_y_val)
-    train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=32)
-    model = SimpleCNN(num_features, num_classes).to(device)
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    train_losses = []
-    val_losses = []
-    for epoch in range(num_epochs):
-        model.train()
-        running_loss = 0.0
-        total = 0
-        for xb, yb in tqdm(train_loader, desc=f"Fold {fold+1} Epoch {epoch+1}/{num_epochs} [Train]"):
+# Training loop
+num_epochs = 100
+train_losses = []
+val_losses = []
+for epoch in range(num_epochs):
+    model.train()
+    running_loss = 0.0
+    total = 0
+    for xb, yb in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} [Train]"):
+        xb, yb = xb.to(device), yb.to(device)
+        optimizer.zero_grad()
+        out = model(xb)
+        loss = criterion(out, yb)
+        loss.backward()
+        optimizer.step()
+        running_loss += loss.item() * xb.size(0)
+        total += yb.size(0)
+    train_loss = running_loss / total
+    train_losses.append(train_loss)
+    # Validation
+    model.eval()
+    val_running_loss = 0.0
+    val_correct = 0
+    val_total = 0
+    with torch.no_grad():
+        for xb, yb in tqdm(test_loader, desc=f"Epoch {epoch+1}/{num_epochs} [Val]"):
             xb, yb = xb.to(device), yb.to(device)
-            optimizer.zero_grad()
             out = model(xb)
             loss = criterion(out, yb)
-            loss.backward()
-            optimizer.step()
-            running_loss += loss.item() * xb.size(0)
-            total += yb.size(0)
-        train_loss = running_loss / total
-        train_losses.append(train_loss)
-        # Validation
-        model.eval()
-        val_running_loss = 0.0
-        val_correct = 0
-        val_total = 0
-        with torch.no_grad():
-            for xb, yb in tqdm(val_loader, desc=f"Fold {fold+1} Epoch {epoch+1}/{num_epochs} [Val]"):
-                xb, yb = xb.to(device), yb.to(device)
-                out = model(xb)
-                loss = criterion(out, yb)
-                val_running_loss += loss.item() * xb.size(0)
-                preds = torch.argmax(out, dim=1)
-                val_correct += (preds == yb).sum().item()
-                val_total += yb.size(0)
-        val_loss = val_running_loss / val_total
-        val_acc = val_correct / val_total
-        val_losses.append(val_loss)
-        # Calculate training accuracy
-        train_acc = None
-        with torch.no_grad():
-            train_correct = 0
-            train_total = 0
-            for xb, yb in train_loader:
-                xb, yb = xb.to(device), yb.to(device)
-                out = model(xb)
-                preds = torch.argmax(out, dim=1)
-                train_correct += (preds == yb).sum().item()
-                train_total += yb.size(0)
-            train_acc = train_correct / train_total
-        if (epoch+1) % 5 == 0 or epoch == 0:
-            print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
-    fold_accuracies.append(val_acc)
-    print(f"Fold {fold+1} final validation accuracy: {val_acc:.4f}")
-print(f"\nAverage 3-fold validation accuracy: {np.mean(fold_accuracies):.4f}")
+            val_running_loss += loss.item() * xb.size(0)
+            preds = torch.argmax(out, dim=1)
+            val_correct += (preds == yb).sum().item()
+            val_total += yb.size(0)
+    val_loss = val_running_loss / val_total
+    val_acc = val_correct / val_total
+    val_losses.append(val_loss)
+    # Calculate training accuracy
+    train_acc = None
+    with torch.no_grad():
+        train_correct = 0
+        train_total = 0
+        for xb, yb in train_loader:
+            xb, yb = xb.to(device), yb.to(device)
+            out = model(xb)
+            preds = torch.argmax(out, dim=1)
+            train_correct += (preds == yb).sum().item()
+            train_total += yb.size(0)
+        train_acc = train_correct / train_total
+    if (epoch+1) % 5 == 0 or epoch == 0:
+        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
 
 # Evaluation
 model.eval()
