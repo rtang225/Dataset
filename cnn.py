@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import accuracy_score
+from sklearn.utils.class_weight import compute_class_weight
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -48,6 +49,10 @@ train_ds = TensorDataset(torch_X_train, torch_y_train)
 test_ds = TensorDataset(torch_X_test, torch_y_test)
 train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
 test_loader = DataLoader(test_ds, batch_size=32)
+
+# Compute class weights for imbalanced classes
+class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(y), y=y)
+class_weights = torch.tensor(class_weights, dtype=torch.float32).to(device)
 
 # Define CNN model
 class SimpleCNN(nn.Module):
@@ -98,19 +103,28 @@ model = SimpleCNN(num_features, num_classes).to(device)
 print(f"Model is on device: {next(model.parameters()).device}")
 
 # Training setup
-criterion = nn.CrossEntropyLoss()
+criterion = nn.CrossEntropyLoss(weight=class_weights)
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 # Training loop with 3-fold cross-validation
 num_epochs = 50
 kf = KFold(n_splits=3, shuffle=True, random_state=42)
 fold_accuracies = []
-for fold, (train_idx, val_idx) in enumerate(kf.split(X_cnn)):
+for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
     print(f"\nFold {fold+1}/3")
-    X_train_fold, X_val_fold = X_cnn[train_idx], X_cnn[val_idx]
+    # Split data for this fold
+    X_train_fold, X_val_fold = X.iloc[train_idx], X.iloc[val_idx]
     y_train_fold, y_val_fold = y[train_idx], y[val_idx]
-    torch_X_train = torch.tensor(X_train_fold, dtype=torch.float32).to(device)
-    torch_X_val = torch.tensor(X_val_fold, dtype=torch.float32).to(device)
+    # Fit scaler and encoder only on training fold
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train_fold)
+    X_val_scaled = scaler.transform(X_val_fold)
+    # Reshape for Conv1D
+    X_train_cnn = X_train_scaled.reshape((X_train_scaled.shape[0], 1, X_train_scaled.shape[1]))
+    X_val_cnn = X_val_scaled.reshape((X_val_scaled.shape[0], 1, X_val_scaled.shape[1]))
+    # Convert to tensors
+    torch_X_train = torch.tensor(X_train_cnn, dtype=torch.float32).to(device)
+    torch_X_val = torch.tensor(X_val_cnn, dtype=torch.float32).to(device)
     torch_y_train = torch.tensor(y_train_fold, dtype=torch.long).to(device)
     torch_y_val = torch.tensor(y_val_fold, dtype=torch.long).to(device)
     train_ds = TensorDataset(torch_X_train, torch_y_train)
@@ -118,7 +132,7 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X_cnn)):
     train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=32)
     model = SimpleCNN(num_features, num_classes).to(device)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     train_losses = []
     val_losses = []
