@@ -11,6 +11,7 @@ from PIL import Image
 import os
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from sklearn.utils.class_weight import compute_class_weight
 
 # Updated image extraction from coordinates
 IMAGE_FOLDER = 'images\\wildfire'
@@ -90,8 +91,15 @@ model = SimpleCNN(num_classes)
 # Training setup
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
+# Compute class weights for imbalanced classes
+y_labels = pd.read_csv(csv_path)['Area_Class']
+le = LabelEncoder()
+y_labels_encoded = le.fit_transform(y_labels.astype(str))
+class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(y_labels_encoded), y=y_labels_encoded)
+class_weights = torch.tensor(class_weights, dtype=torch.float32, device=device)
+
 model = model.to(device)
-criterion = nn.CrossEntropyLoss()
+criterion = nn.CrossEntropyLoss(weight=class_weights)
 optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.5)
 
 # Training loop
