@@ -58,14 +58,14 @@ class_weights = torch.tensor(class_weights, dtype=torch.float32).to(device)
 class SimpleCNN(nn.Module):
     def __init__(self, num_features, num_classes):
         super().__init__()
-        self.conv1 = nn.Conv1d(1, 32, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm1d(32)
+        self.conv1 = nn.Conv1d(1, 64, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm1d(64)
         self.pool1 = nn.MaxPool1d(2)
-        self.conv2 = nn.Conv1d(32, 64, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm1d(64)
+        self.conv2 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm1d(128)
         self.pool2 = nn.MaxPool1d(2)
-        self.conv3 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
-        self.bn3 = nn.BatchNorm1d(128)
+        self.conv3 = nn.Conv1d(128, 256, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm1d(256)
         self.pool3 = nn.MaxPool1d(2)
         self.flatten = nn.Flatten()
         # Dynamically determine the flattened size
@@ -104,12 +104,16 @@ print(f"Model is on device: {next(model.parameters()).device}")
 
 # Training setup
 criterion = nn.CrossEntropyLoss(weight=class_weights)
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=0.0005)
 
 # Training loop with 3-fold cross-validation
-num_epochs = 25
+num_epochs = 20
 kf = KFold(n_splits=3, shuffle=True, random_state=42)
 fold_accuracies = []
+all_train_losses = []
+all_val_losses = []
+all_train_accuracies = []
+all_val_accuracies = []
 for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
     print(f"\nFold {fold+1}/3")
     # Split data for this fold
@@ -133,9 +137,11 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
     val_loader = DataLoader(val_ds, batch_size=32)
     model = SimpleCNN(num_features, num_classes).to(device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.0005)
     train_losses = []
     val_losses = []
+    train_accuracies = []
+    val_accuracies = []
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
@@ -168,7 +174,6 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
         val_loss = val_running_loss / val_total
         val_acc = val_correct / val_total
         val_losses.append(val_loss)
-        # Calculate training accuracy
         train_acc = None
         with torch.no_grad():
             train_correct = 0
@@ -180,20 +185,61 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
                 train_correct += (preds == yb).sum().item()
                 train_total += yb.size(0)
             train_acc = train_correct / train_total
+        train_accuracies.append(train_acc)
+        val_accuracies.append(val_acc)
         if (epoch+1) % 5 == 0 or epoch == 0:
             print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+    all_train_losses.append(train_losses)
+    all_val_losses.append(val_losses)
+    all_train_accuracies.append(train_accuracies)
+    all_val_accuracies.append(val_accuracies)
     fold_accuracies.append(val_acc)
     print(f"Fold {fold+1} final validation accuracy: {val_acc:.4f}")
 print(f"\nAverage 3-fold validation accuracy: {np.mean(fold_accuracies):.4f}")
 
-# Evaluation
+# Plot training and validation loss/accuracy curves for each fold
+plt.figure(figsize=(16, 6))
+for i in range(len(all_train_losses)):
+    plt.subplot(1, 2, 1)
+    plt.plot(all_train_losses[i], label=f'Train Fold {i+1}')
+    plt.plot(all_val_losses[i], label=f'Val Fold {i+1}', linestyle='--')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training and Validation Loss')
+    plt.legend()
+    plt.subplot(1, 2, 2)
+    plt.plot(all_train_accuracies[i], label=f'Train Acc Fold {i+1}')
+    plt.plot(all_val_accuracies[i], label=f'Val Acc Fold {i+1}', linestyle='--')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.title('Training and Validation Accuracy')
+    plt.legend()
+plt.tight_layout()
+plt.show()
+
+# Evaluation on test set
 model.eval()
+test_correct = 0
+test_total = 0
 with torch.no_grad():
-    preds = []
-    for xb, _ in test_loader:
-        xb = xb.to(device)
+    for xb, yb in test_loader:
+        xb, yb = xb.to(device), yb.to(device)
         out = model(xb)
-        preds.append(torch.argmax(out, dim=1).cpu().numpy())
-    preds = np.concatenate(preds)
-    acc = accuracy_score(y_test, preds)
-    print(f'Test accuracy: {acc:.3f}')
+        preds = torch.argmax(out, dim=1)
+        test_correct += (preds == yb).sum().item()
+        test_total += yb.size(0)
+test_acc = test_correct / test_total
+print(f'Test accuracy: {test_acc:.3f}')
+
+# Plot training, validation, and test accuracy on a line graph
+plt.figure(figsize=(8, 6))
+for i in range(len(all_train_accuracies)):
+    plt.plot(all_train_accuracies[i], label=f'Train Acc Fold {i+1}')
+    plt.plot(all_val_accuracies[i], label=f'Val Acc Fold {i+1}', linestyle='--')
+plt.axhline(y=test_acc, color='r', linestyle='-', label='Test Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.title('Training, Validation, and Test Accuracy')
+plt.legend()
+plt.tight_layout()
+plt.show()

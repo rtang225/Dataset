@@ -58,22 +58,19 @@ class_weights = torch.tensor(class_weights, dtype=torch.float32).to(device)
 class SimpleCNN(nn.Module):
     def __init__(self, num_features, num_classes):
         super().__init__()
-        self.conv1 = nn.Conv1d(1, 32, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm1d(32)
-        self.pool1 = nn.MaxPool1d(2)
-        self.conv2 = nn.Conv1d(32, 64, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm1d(64)
-        self.pool2 = nn.MaxPool1d(2)
-        self.conv3 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
-        self.bn3 = nn.BatchNorm1d(128)
-        self.pool3 = nn.MaxPool1d(2)
+        self.conv1 = nn.Conv1d(1, 64, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.conv2 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm1d(128)
+        self.conv3 = nn.Conv1d(128, 256, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm1d(256)
         self.flatten = nn.Flatten()
         # Dynamically determine the flattened size
         with torch.no_grad():
             dummy = torch.zeros(1, 1, num_features)
-            x = self.pool1(torch.relu(self.bn1(self.conv1(dummy))))
-            x = self.pool2(torch.relu(self.bn2(self.conv2(x))))
-            x = self.pool3(torch.relu(self.bn3(self.conv3(x))))
+            x = torch.relu(self.bn1(self.conv1(dummy)))
+            x = torch.relu(self.bn2(self.conv2(x)))
+            x = torch.relu(self.bn3(self.conv3(x)))
             flat_size = x.numel()
         self.fc1 = nn.Linear(flat_size, 256)
         self.dropout1 = nn.Dropout(0.6)
@@ -83,11 +80,8 @@ class SimpleCNN(nn.Module):
         self.fc4 = nn.Linear(64, num_classes)
     def forward(self, x):
         x = torch.relu(self.bn1(self.conv1(x)))
-        x = self.pool1(x)
         x = torch.relu(self.bn2(self.conv2(x)))
-        x = self.pool2(x)
         x = torch.relu(self.bn3(self.conv3(x)))
-        x = self.pool3(x)
         x = self.flatten(x)
         x = torch.relu(self.fc1(x))
         x = self.dropout1(x)
@@ -104,16 +98,20 @@ print(f"Model is on device: {next(model.parameters()).device}")
 
 # Training setup
 criterion = nn.CrossEntropyLoss(weight=class_weights)
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=0.0005)
 
 # Training loop
 num_epochs = 100
 train_losses = []
 val_losses = []
+train_accuracies = []
+val_accuracies = []
 for epoch in range(num_epochs):
     model.train()
     running_loss = 0.0
     total = 0
+    train_correct = 0
+    train_total = 0
     for xb, yb in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} [Train]"):
         xb, yb = xb.to(device), yb.to(device)
         optimizer.zero_grad()
@@ -123,7 +121,11 @@ for epoch in range(num_epochs):
         optimizer.step()
         running_loss += loss.item() * xb.size(0)
         total += yb.size(0)
+        preds = torch.argmax(out, dim=1)
+        train_correct += (preds == yb).sum().item()
+        train_total += yb.size(0)
     train_loss = running_loss / total
+    train_acc = train_correct / train_total
     train_losses.append(train_loss)
     # Validation
     model.eval()
@@ -142,18 +144,8 @@ for epoch in range(num_epochs):
     val_loss = val_running_loss / val_total
     val_acc = val_correct / val_total
     val_losses.append(val_loss)
-    # Calculate training accuracy
-    train_acc = None
-    with torch.no_grad():
-        train_correct = 0
-        train_total = 0
-        for xb, yb in train_loader:
-            xb, yb = xb.to(device), yb.to(device)
-            out = model(xb)
-            preds = torch.argmax(out, dim=1)
-            train_correct += (preds == yb).sum().item()
-            train_total += yb.size(0)
-        train_acc = train_correct / train_total
+    train_accuracies.append(train_acc)
+    val_accuracies.append(val_acc)
     if (epoch+1) % 5 == 0 or epoch == 0:
         print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
 
@@ -168,3 +160,26 @@ with torch.no_grad():
     preds = np.concatenate(preds)
     acc = accuracy_score(y_test, preds)
     print(f'Test accuracy: {acc:.3f}')
+
+# After training loop and evaluation
+# Plot training and validation loss
+plt.figure(figsize=(12, 5))
+plt.subplot(1, 2, 1)
+plt.plot(train_losses, label='Train Loss')
+plt.plot(val_losses, label='Validation Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Training and Validation Loss')
+plt.legend()
+
+# Plot training, validation, and test accuracy
+plt.subplot(1, 2, 2)
+plt.plot(train_accuracies, label='Train Accuracy')
+plt.plot(val_accuracies, label='Validation Accuracy')
+plt.axhline(y=acc, color='r', linestyle='--', label='Test Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.title('Training, Validation, and Test Accuracy')
+plt.legend()
+plt.tight_layout()
+plt.show()
