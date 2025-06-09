@@ -86,10 +86,10 @@ class SimpleCNN(nn.Module):
         self.fc2 = nn.Linear(256, 128)
         self.fc3 = nn.Linear(128, num_classes)
     def forward(self, x):
-        x = self.pool1(torch.tanh(self.conv1(x)))
-        x = self.pool2(torch.tanh(self.conv2(x)))
-        x = self.pool3(torch.tanh(self.conv3(x)))
-        x = self.pool4(torch.tanh(self.conv4(x)))
+        x = self.pool1(torch.sigmoid(self.conv1(x)))
+        x = self.pool2(torch.sigmoid(self.conv2(x)))
+        x = self.pool3(torch.sigmoid(self.conv3(x)))
+        x = self.pool4(torch.sigmoid(self.conv4(x)))
         x = x.view(x.size(0), -1)
         x = self.dropout1(torch.relu(self.fc1(x)))
         x = self.dropout2(torch.relu(self.fc2(x)))
@@ -111,7 +111,7 @@ class_weights = torch.tensor(class_weights, dtype=torch.float32, device=device)
 
 model = model.to(device)
 criterion = nn.CrossEntropyLoss(weight=class_weights)
-optimizer = optim.Adam(model.parameters(), lr=0.00001, weight_decay=1e-5)
+optimizer = optim.Adam(model.parameters(), lr=0.000001, weight_decay=1e-5)
 
 # Training loop
 train_losses = []
