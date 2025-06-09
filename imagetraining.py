@@ -53,7 +53,7 @@ class ImageCoordDataset(Dataset):
         return img, label
 
 # Load dataset
-csv_path = 'image_labels.csv'
+csv_path = 'imagelabelsreduced.csv'
 dataset = ImageCoordDataset(csv_path)
 
 # Train/test split
@@ -61,8 +61,8 @@ indices = np.arange(len(dataset))
 train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=42)
 train_ds = torch.utils.data.Subset(dataset, train_idx)
 test_ds = torch.utils.data.Subset(dataset, test_idx)
-train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
-test_loader = DataLoader(test_ds, batch_size=32)
+train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
+test_loader = DataLoader(test_ds, batch_size=64)
 
 # Simple CNN model
 def get_num_classes(csv_path):
@@ -72,17 +72,28 @@ def get_num_classes(csv_path):
 class SimpleCNN(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 16, 3, padding=1)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(16, 32, 3, padding=1)
-        self.fc1 = nn.Linear(32 * 16 * 16, 128)
-        self.fc2 = nn.Linear(128, num_classes)
+        self.conv1 = nn.Conv2d(3, 32, 3, padding=1)
+        self.pool1 = nn.MaxPool2d(2, 2)
+        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
+        self.pool2 = nn.MaxPool2d(2, 2)
+        self.conv3 = nn.Conv2d(64, 128, 3, padding=1)
+        self.pool3 = nn.MaxPool2d(2, 2)
+        self.conv4 = nn.Conv2d(128, 256, 3, padding=1)
+        self.pool4 = nn.MaxPool2d(2, 2)
+        self.dropout1 = nn.Dropout(0.4)
+        self.fc1 = nn.Linear(256 * 4 * 4, 256)
+        self.dropout2 = nn.Dropout(0.4)
+        self.fc2 = nn.Linear(256, 128)
+        self.fc3 = nn.Linear(128, num_classes)
     def forward(self, x):
-        x = self.pool(torch.relu(self.conv1(x)))
-        x = self.pool(torch.relu(self.conv2(x)))
+        x = self.pool1(torch.tanh(self.conv1(x)))
+        x = self.pool2(torch.tanh(self.conv2(x)))
+        x = self.pool3(torch.tanh(self.conv3(x)))
+        x = self.pool4(torch.tanh(self.conv4(x)))
         x = x.view(x.size(0), -1)
-        x = torch.relu(self.fc1(x))
-        x = self.fc2(x)
+        x = self.dropout1(torch.relu(self.fc1(x)))
+        x = self.dropout2(torch.relu(self.fc2(x)))
+        x = self.fc3(x)
         return x
 
 num_classes = get_num_classes(csv_path)
@@ -100,14 +111,14 @@ class_weights = torch.tensor(class_weights, dtype=torch.float32, device=device)
 
 model = model.to(device)
 criterion = nn.CrossEntropyLoss(weight=class_weights)
-optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.5)
+optimizer = optim.Adam(model.parameters(), lr=0.00001, weight_decay=1e-5)
 
 # Training loop
 train_losses = []
 train_accuracies = []
 val_losses = []
 val_accuracies = []
-num_epochs = 10
+num_epochs = 25
 for epoch in range(num_epochs):
     model.train()
     running_loss = 0.0
