@@ -104,10 +104,10 @@ print(f"Model is on device: {next(model.parameters()).device}")
 
 # Training setup
 criterion = nn.CrossEntropyLoss(weight=class_weights)
-optimizer = optim.Adam(model.parameters(), lr=0.0005)
+optimizer = optim.Adam(model.parameters(), lr=0.0001)
 
 # Training loop with 3-fold cross-validation
-num_epochs = 20
+num_epochs = 25
 kf = KFold(n_splits=3, shuffle=True, random_state=42)
 fold_accuracies = []
 all_train_losses = []
@@ -137,7 +137,7 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
     val_loader = DataLoader(val_ds, batch_size=32)
     model = SimpleCNN(num_features, num_classes).to(device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
-    optimizer = optim.Adam(model.parameters(), lr=0.0005)
+    optimizer = optim.Adam(model.parameters(), lr=0.0001)
     train_losses = []
     val_losses = []
     train_accuracies = []
