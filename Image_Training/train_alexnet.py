@@ -1,4 +1,4 @@
-# no change in results
+# no change in results, stuck at 45.1%
 import os
 import torch
 import torch.nn as nn
