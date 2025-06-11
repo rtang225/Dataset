@@ -4,7 +4,7 @@ from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import LabelBinarizer
 
 # Load the data
-file_path = 'imagelabelsreduced.csv'
+file_path = 'human_image_labels.csv'
 df = pd.read_csv(file_path)
 
 # Dummy (one-hot) encode the target

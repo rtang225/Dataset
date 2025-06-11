@@ -11,6 +11,7 @@ import pandas as pd
 from torchvision import transforms
 from PIL import Image
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 # AlexNet model definition
 class AlexNet(nn.Module):
@@ -88,7 +89,7 @@ class ImageCoordDataset(torch.utils.data.Dataset):
         return img, label
 
 # Load dataset
-csv_path = 'imagelabelsreduced.csv'
+csv_path = 'human_image_labels.csv'
 dataset = ImageCoordDataset(csv_path)
 indices = np.arange(len(dataset))
 train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=42)
@@ -100,12 +101,20 @@ test_loader = DataLoader(test_ds, batch_size=32)
 # Model, loss, optimizer
 num_classes = len(pd.read_csv(csv_path)['Area_Class'].unique())
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+if torch.cuda.is_available():
+    print('Training with GPU (CUDA)')
+else:
+    print('Training with CPU')
 model = AlexNet(num_classes).to(device)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 # Training loop
-num_epochs = 10
+train_losses = []
+train_accuracies = []
+val_losses = []
+val_accuracies = []
+num_epochs = 25
 for epoch in range(num_epochs):
     model.train()
     running_loss = 0.0
@@ -124,7 +133,46 @@ for epoch in range(num_epochs):
         total += labels.size(0)
     train_loss = running_loss / total
     train_acc = correct / total
-    print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
+    train_losses.append(train_loss)
+    train_accuracies.append(train_acc)
+    # Validation
+    model.eval()
+    val_running_loss = 0.0
+    val_correct = 0
+    val_total = 0
+    with torch.no_grad():
+        for imgs, labels in test_loader:
+            imgs, labels = imgs.to(device), labels.to(device).long()
+            outputs = model(imgs)
+            loss = criterion(outputs, labels)
+            val_running_loss += loss.item() * imgs.size(0)
+            _, preds = torch.max(outputs, 1)
+            val_correct += (preds == labels).sum().item()
+            val_total += labels.size(0)
+    val_loss = val_running_loss / val_total
+    val_acc = val_correct / val_total
+    val_losses.append(val_loss)
+    val_accuracies.append(val_acc)
+    print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+
+# Plot learning curves
+plt.figure(figsize=(12,5))
+plt.subplot(1,2,1)
+plt.plot(train_losses, label='Train Loss')
+plt.plot(val_losses, label='Val Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Loss Curve')
+plt.legend()
+plt.subplot(1,2,2)
+plt.plot(train_accuracies, label='Train Acc')
+plt.plot(val_accuracies, label='Val Acc')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.title('Accuracy Curve')
+plt.legend()
+plt.tight_layout()
+plt.show()
 
 # Evaluation
 model.eval()

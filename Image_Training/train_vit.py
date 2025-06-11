@@ -56,6 +56,10 @@ test_loader = DataLoader(test_ds, batch_size=16)
 
 num_classes = len(pd.read_csv(csv_path)['Area_Class'].unique())
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+if torch.cuda.is_available():
+    print('Training with GPU (CUDA)')
+else:
+    print('Training with CPU')
 model = vit_b_16(weights=None, num_classes=num_classes).to(device)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.0001)

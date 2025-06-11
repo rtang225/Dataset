@@ -1,4 +1,5 @@
 # Overfit to hell
+# Learning rate adjusted to 0.00001, run again
 import os
 import torch
 import torch.nn as nn
@@ -41,7 +42,7 @@ class ImageCoordDataset(torch.utils.data.Dataset):
             img = self.transform(img)
         return img, label
 
-csv_path = 'imagelabelsreduced.csv'
+csv_path = 'human_image_labels.csv'
 default_transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
@@ -57,11 +58,15 @@ test_loader = DataLoader(test_ds, batch_size=16)
 
 num_classes = len(pd.read_csv(csv_path)['Area_Class'].unique())
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+if torch.cuda.is_available():
+    print('Training with GPU (CUDA)')
+else:
+    print('Training with CPU')
 model = resnet18(weights=None)
 model.fc = nn.Linear(model.fc.in_features, num_classes)
 model = model.to(device)
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.0001)
+optimizer = optim.Adam(model.parameters(), lr=0.00001)
 
 train_losses = []
 train_accuracies = []
