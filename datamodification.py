@@ -1,7 +1,7 @@
 import pandas as pd
 
 # Read the CSV file
-df = pd.read_csv('wf.csv')
+df = pd.read_csv('humanwf.csv')
 df = df.drop(columns = ['Date', 'vNDVI', 'VARI'])
 
 # Reclassify 'area' variable into area_class
@@ -10,4 +10,4 @@ labels = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 df['Area_Class'] = pd.cut(df['Area'], bins=bins, labels=labels, right=True)
 df = df.drop(columns=['Area'])
 
-df.to_csv('image_labels.csv', index=False)
+df.to_csv('human_image_labels.csv', index=False)
