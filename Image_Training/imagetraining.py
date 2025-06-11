@@ -53,7 +53,7 @@ class ImageCoordDataset(Dataset):
         return img, label
 
 # Load dataset
-csv_path = 'imagelabelsreduced.csv'
+csv_path = 'human_image_labels.csv'
 dataset = ImageCoordDataset(csv_path)
 
 # Train/test split
