@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 from sklearn.utils.class_weight import compute_class_weight
 import torch
 import torch.nn as nn
@@ -12,12 +12,13 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 # Load the dataset
-file_path = 'dataset.csv'
-df = pd.read_csv(file_path)
+file_path = 'datasetreduced.csv'
+df = pd.read_csv(file_path, usecols=['temperature_2m_mean','wind_speed_10m_max', 'relative_humidity_2m_mean', 'wind_speed_10m_mean', 'vapour_pressure_deficit_max', 'area_class', 'apparent_temperature_mean', 'rain_sum', 'soil_moisture_0_to_7cm_mean', 'soil_moisture_7_to_28cm_mean', 'dew_point_2m_mean'])
+print(df.head())
 
 # Prepare features and target
 y = df['area_class']
-X = df.drop(['area_class', 'date', 'latitude', 'longitude', 'rain_sum', 'precipitation_sum', 'temperature_2m_mean', 'growing_degree_days_base_0_limit_50', 'apparent_temperature_mean', 'wet_bulb_temperature_2m_mean', 'et0_fao_evapotranspiration_sum', 'dew_point_2m_mean', 'wind_gusts_10m_max', 'et0_fao_evapotranspiration', 'soil_temperature_0_to_7cm_mean'], axis=1, errors='ignore')
+X = df.drop(['area_class'], axis=1, errors='ignore')
 
 # Encode target if not numeric
 if y.dtype == 'O' or y.dtype.name == 'category':
@@ -68,27 +69,21 @@ class SimpleCNN(nn.Module):
         # Dynamically determine the flattened size
         with torch.no_grad():
             dummy = torch.zeros(1, 1, num_features)
-            x = torch.relu(self.bn1(self.conv1(dummy)))
-            x = torch.relu(self.bn2(self.conv2(x)))
-            x = torch.relu(self.bn3(self.conv3(x)))
+            x = torch.nn.functional.leaky_relu(self.bn1(self.conv1(dummy)), negative_slope=0.01)
+            x = torch.nn.functional.leaky_relu(self.bn2(self.conv2(x)), negative_slope=0.01)
+            x = torch.nn.functional.leaky_relu(self.bn3(self.conv3(x)), negative_slope=0.01)
             flat_size = x.numel()
-        self.fc1 = nn.Linear(flat_size, 256)
-        self.dropout1 = nn.Dropout(0.6)
-        self.fc2 = nn.Linear(256, 128)
-        self.dropout2 = nn.Dropout(0.5)
-        self.fc3 = nn.Linear(128, 64)
-        self.fc4 = nn.Linear(64, num_classes)
+        self.fc1 = nn.Linear(flat_size, 128)
+        self.dropout1 = nn.Dropout(0.4)
+        self.fc2 = nn.Linear(128, num_classes)
     def forward(self, x):
-        x = torch.relu(self.bn1(self.conv1(x)))
-        x = torch.relu(self.bn2(self.conv2(x)))
-        x = torch.relu(self.bn3(self.conv3(x)))
+        x = torch.nn.functional.leaky_relu(self.bn1(self.conv1(x)), negative_slope=0.01)
+        x = torch.nn.functional.leaky_relu(self.bn2(self.conv2(x)), negative_slope=0.01)
+        x = torch.nn.functional.leaky_relu(self.bn3(self.conv3(x)), negative_slope=0.01)
         x = self.flatten(x)
         x = torch.relu(self.fc1(x))
         x = self.dropout1(x)
-        x = torch.relu(self.fc2(x))
-        x = self.dropout2(x)
-        x = torch.relu(self.fc3(x))
-        x = self.fc4(x)
+        x = self.fc2(x)
         return x
 
 num_classes = len(np.unique(y))
@@ -98,10 +93,10 @@ print(f"Model is on device: {next(model.parameters()).device}")
 
 # Training setup
 criterion = nn.CrossEntropyLoss(weight=class_weights)
-optimizer = optim.Adam(model.parameters(), lr=0.0005)
+optimizer = optim.Adam(model.parameters(), lr=0.00001, weight_decay=1e-4)
 
 # Training loop
-num_epochs = 100
+num_epochs = 25
 train_losses = []
 val_losses = []
 train_accuracies = []
@@ -146,8 +141,7 @@ for epoch in range(num_epochs):
     val_losses.append(val_loss)
     train_accuracies.append(train_acc)
     val_accuracies.append(val_acc)
-    if (epoch+1) % 5 == 0 or epoch == 0:
-        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+    print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
 
 # Evaluation
 model.eval()
@@ -160,6 +154,12 @@ with torch.no_grad():
     preds = np.concatenate(preds)
     acc = accuracy_score(y_test, preds)
     print(f'Test accuracy: {acc:.3f}')
+    # Confusion matrix and classification report
+    cm = confusion_matrix(y_test, preds)
+    print('Confusion Matrix:')
+    print(cm)
+    print('Classification Report:')
+    print(classification_report(y_test, preds, digits=3))
 
 # After training loop and evaluation
 # Plot training and validation loss

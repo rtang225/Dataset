@@ -12,12 +12,13 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 # Load the dataset
-file_path = 'dataset.csv'
-df = pd.read_csv(file_path)
+file_path = 'datasetreduced.csv'
+df = pd.read_csv(file_path, usecols=['temperature_2m_mean','wind_speed_10m_max', 'relative_humidity_2m_mean', 'wind_speed_10m_mean', 'vapour_pressure_deficit_max', 'area_class', 'apparent_temperature_mean', 'rain_sum', 'soil_moisture_0_to_7cm_mean', 'soil_moisture_7_to_28cm_mean', 'dew_point_2m_mean'])
+print(df.head())
 
 # Prepare features and target
 y = df['area_class']
-X = df.drop(['area_class', 'date', 'latitude', 'longitude', 'rain_sum', 'precipitation_sum', 'temperature_2m_mean', 'growing_degree_days_base_0_limit_50', 'apparent_temperature_mean', 'wet_bulb_temperature_2m_mean', 'et0_fao_evapotranspiration_sum', 'dew_point_2m_mean', 'wind_gusts_10m_max', 'et0_fao_evapotranspiration', 'soil_temperature_0_to_7cm_mean'], axis=1, errors='ignore')
+X = df.drop(['area_class'], axis=1, errors='ignore')
 
 # Encode target if not numeric
 if y.dtype == 'O' or y.dtype.name == 'category':
@@ -54,47 +55,35 @@ test_loader = DataLoader(test_ds, batch_size=32)
 class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(y), y=y)
 class_weights = torch.tensor(class_weights, dtype=torch.float32).to(device)
 
-# Define CNN model
+# Define CNN model (copied from cnn basic)
 class SimpleCNN(nn.Module):
     def __init__(self, num_features, num_classes):
         super().__init__()
         self.conv1 = nn.Conv1d(1, 64, kernel_size=3, padding=1)
         self.bn1 = nn.BatchNorm1d(64)
-        self.pool1 = nn.MaxPool1d(2)
         self.conv2 = nn.Conv1d(64, 128, kernel_size=3, padding=1)
         self.bn2 = nn.BatchNorm1d(128)
-        self.pool2 = nn.MaxPool1d(2)
         self.conv3 = nn.Conv1d(128, 256, kernel_size=3, padding=1)
         self.bn3 = nn.BatchNorm1d(256)
-        self.pool3 = nn.MaxPool1d(2)
         self.flatten = nn.Flatten()
         # Dynamically determine the flattened size
         with torch.no_grad():
             dummy = torch.zeros(1, 1, num_features)
-            x = self.pool1(torch.relu(self.bn1(self.conv1(dummy))))
-            x = self.pool2(torch.relu(self.bn2(self.conv2(x))))
-            x = self.pool3(torch.relu(self.bn3(self.conv3(x))))
+            x = torch.sigmoid(self.bn1(self.conv1(dummy)))
+            x = torch.sigmoid(self.bn2(self.conv2(x)))
+            x = torch.sigmoid(self.bn3(self.conv3(x)))
             flat_size = x.numel()
-        self.fc1 = nn.Linear(flat_size, 256)
-        self.dropout1 = nn.Dropout(0.6)
-        self.fc2 = nn.Linear(256, 128)
-        self.dropout2 = nn.Dropout(0.5)
-        self.fc3 = nn.Linear(128, 64)
-        self.fc4 = nn.Linear(64, num_classes)
+        self.fc1 = nn.Linear(flat_size, 128)
+        self.dropout1 = nn.Dropout(0.4)
+        self.fc2 = nn.Linear(128, num_classes)
     def forward(self, x):
-        x = torch.relu(self.bn1(self.conv1(x)))
-        x = self.pool1(x)
-        x = torch.relu(self.bn2(self.conv2(x)))
-        x = self.pool2(x)
-        x = torch.relu(self.bn3(self.conv3(x)))
-        x = self.pool3(x)
+        x = torch.sigmoid(self.bn1(self.conv1(x)))
+        x = torch.sigmoid(self.bn2(self.conv2(x)))
+        x = torch.sigmoid(self.bn3(self.conv3(x)))
         x = self.flatten(x)
         x = torch.relu(self.fc1(x))
         x = self.dropout1(x)
-        x = torch.relu(self.fc2(x))
-        x = self.dropout2(x)
-        x = torch.relu(self.fc3(x))
-        x = self.fc4(x)
+        x = self.fc2(x)
         return x
 
 num_classes = len(np.unique(y))
@@ -187,8 +176,7 @@ for fold, (train_idx, val_idx) in enumerate(kf.split(X)):
             train_acc = train_correct / train_total
         train_accuracies.append(train_acc)
         val_accuracies.append(val_acc)
-        if (epoch+1) % 5 == 0 or epoch == 0:
-            print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
     all_train_losses.append(train_losses)
     all_val_losses.append(val_losses)
     all_train_accuracies.append(train_accuracies)
@@ -230,16 +218,3 @@ with torch.no_grad():
         test_total += yb.size(0)
 test_acc = test_correct / test_total
 print(f'Test accuracy: {test_acc:.3f}')
-
-# Plot training, validation, and test accuracy on a line graph
-plt.figure(figsize=(8, 6))
-for i in range(len(all_train_accuracies)):
-    plt.plot(all_train_accuracies[i], label=f'Train Acc Fold {i+1}')
-    plt.plot(all_val_accuracies[i], label=f'Val Acc Fold {i+1}', linestyle='--')
-plt.axhline(y=test_acc, color='r', linestyle='-', label='Test Accuracy')
-plt.xlabel('Epoch')
-plt.ylabel('Accuracy')
-plt.title('Training, Validation, and Test Accuracy')
-plt.legend()
-plt.tight_layout()
-plt.show()
