@@ -52,19 +52,35 @@ class BasicMLP(nn.Module):
     def __init__(self, num_features, num_classes):
         super().__init__()
         self.fc1 = nn.Linear(num_features, 256)
+        self.bn1 = nn.BatchNorm1d(256)
         self.relu1 = nn.ReLU()
         self.fc2 = nn.Linear(256, 128)
+        self.dropout2 = nn.Dropout(0.1)
+        self.bn2 = nn.BatchNorm1d(128)
         self.relu2 = nn.ReLU()
         self.fc3 = nn.Linear(128, 64)
+        self.bn3 = nn.BatchNorm1d(64)
         self.relu3 = nn.ReLU()
         self.fc4 = nn.Linear(64, 32)
+        self.dropout4 = nn.Dropout(0.1)
+        self.bn4 = nn.BatchNorm1d(32)
         self.relu4 = nn.ReLU()
         self.fc5 = nn.Linear(32, num_classes)
     def forward(self, x):
-        x = self.relu1(self.fc1(x))
-        x = self.relu2(self.fc2(x))
-        x = self.relu3(self.fc3(x))
-        x = self.relu4(self.fc4(x))
+        x = self.fc1(x)
+        x = self.bn1(x)
+        x = self.relu1(x)
+        x = self.fc2(x)
+        x = self.dropout2(x)
+        x = self.bn2(x)
+        x = self.relu2(x)
+        x = self.fc3(x)
+        x = self.bn3(x)
+        x = self.relu3(x)
+        x = self.fc4(x)
+        x = self.dropout4(x)
+        x = self.bn4(x)
+        x = self.relu4(x)
         x = self.fc5(x)
         return x
 
@@ -74,10 +90,10 @@ model = BasicMLP(num_features, num_classes).to(device)
 
 # Training setup
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.005)
+optimizer = optim.Adam(model.parameters(), lr=0.003)
 
 # Training loop
-num_epochs = 100
+num_epochs = 50
 train_losses = []
 val_losses = []
 train_accuracies = []
