@@ -50,24 +50,32 @@ test_loader = DataLoader(test_ds, batch_size=32)
 class BasicMLP(nn.Module):
     def __init__(self, num_features, num_classes):
         super().__init__()
-        self.fc1 = nn.Linear(num_features, 128)
+        self.fc1 = nn.Linear(num_features, 256)
         self.relu1 = nn.ReLU()
-        self.fc2 = nn.Linear(128, 64)
+        self.fc2 = nn.Linear(256, 128)
         self.relu2 = nn.ReLU()
-        self.fc3 = nn.Linear(64, num_classes)
+        self.fc3 = nn.Linear(128, 64)
+        self.relu3 = nn.ReLU()
+        self.fc4 = nn.Linear(64, 32)
+        self.relu4 = nn.ReLU()
+        self.fc5 = nn.Linear(32, num_classes)
     def forward(self, x):
         x = self.relu1(self.fc1(x))
         x = self.relu2(self.fc2(x))
-        x = self.fc3(x)
+        x = self.relu3(self.fc3(x))
+        x = self.relu4(self.fc4(x))
+        x = self.fc5(x)
         return x
 
 num_classes = len(np.unique(y))
 num_features = X_train.shape[1]
+# print(f"Number of features: {num_features}, Number of classes: {num_classes}")
 model = BasicMLP(num_features, num_classes).to(device)
+# print(model)
 
 # Training setup
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.0003)
+optimizer = optim.Adam(model.parameters(), lr=0.0001)
 
 # Training loop
 num_epochs = 50
@@ -131,6 +139,7 @@ with torch.no_grad():
     print(cm)
     print('Classification Report:')
     print(classification_report(y_test, preds, digits=3))
+    print(np.bincount(preds))
 
 # Plot training and validation loss
 import matplotlib.pyplot as plt
