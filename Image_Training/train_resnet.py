@@ -1,5 +1,4 @@
 # Overfit to hell
-# Learning rate adjusted to 0.00001, run again
 import os
 import torch
 import torch.nn as nn
