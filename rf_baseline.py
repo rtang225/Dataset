@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from xgboost import XGBClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 from tqdm import tqdm
 from imblearn.over_sampling import SMOTE
@@ -32,28 +32,24 @@ X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, 
 smote = SMOTE(random_state=42)
 X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
 
-# XGBoost parameter tuning with progress bar
-param_grid_xgb = {
+# Random Forest parameter tuning
+param_grid = {
     'n_estimators': [100, 200],
-    'max_depth': [3, 5, 7],
-    'learning_rate': [0.01, 0.1, 0.2],
-    'subsample': [0.8, 1.0],
-    'colsample_bytree': [0.8, 1.0]
+    'max_depth': [None, 5, 10, 20],
+    'min_samples_split': [2, 5, 10],
+    'min_samples_leaf': [1, 2, 4],
+    'bootstrap': [True, False]
 }
-xgb = XGBClassifier(eval_metric='mlogloss', random_state=42)
-grid_xgb = GridSearchCV(xgb, param_grid_xgb, cv=5, verbose=2, n_jobs=-1)
-print('Tuning XGBoost parameters...')
-grid_xgb.fit(X_resampled, y_resampled)
-print(f"Best XGBoost parameters: {grid_xgb.best_params_}")
-print(f"Best XGBoost CV score: {grid_xgb.best_score_:.4f}")
-preds = grid_xgb.predict(X_test)
+rf = RandomForestClassifier(class_weight='balanced', random_state=42)
+grid = GridSearchCV(rf, param_grid, cv=5, verbose=2, n_jobs=-1)
+print('Tuning Random Forest parameters...')
+grid.fit(X_resampled, y_resampled)
+print(f"Best Random Forest parameters: {grid.best_params_}")
+print(f"Best Random Forest CV score: {grid.best_score_:.4f}")
+preds = grid.predict(X_test)
 acc = accuracy_score(y_test, preds)
-print(f'XGBoost Test accuracy: {acc:.3f}')
+print(f'Random Forest Test accuracy: {acc:.3f}')
 print('Confusion Matrix:')
 print(confusion_matrix(y_test, preds))
 print('Classification Report:')
 print(classification_report(y_test, preds, digits=3))
-
-print('Training XGBoost...')
-xgb = XGBClassifier(n_estimators=100, eval_metric='mlogloss', random_state=42, tree_method='hist')
-print('XGBoost will use device: cpu')
