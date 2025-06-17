@@ -5,6 +5,7 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 from tqdm import tqdm
+from imblearn.over_sampling import SMOTE
 
 # Load the dataset
 file_path = 'datasetreduced.csv'
@@ -27,6 +28,10 @@ X_scaled = scaler.fit_transform(X)
 # Train/test split
 X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
 
+# Apply SMOTE to balance classes
+smote = SMOTE(random_state=42)
+X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
+
 # Train SVM with manual grid search
 param_grid = {
     'C': [0.1, 1, 10],
@@ -45,7 +50,10 @@ for params in tqdm(param_list, desc='SVM Grid Search'):
     if params['kernel'] != 'poly':
         params = {k: v for k, v in params.items() if k != 'degree'}
     clf = SVC(**params, class_weight='balanced', probability=True)
-    clf.fit(X_train, y_train)
+    # Train SVM with progress bar
+    print('Training SVM...')
+    for _ in tqdm(range(1), desc='SVM Training'):
+        clf.fit(X_resampled, y_resampled)
     preds = clf.predict(X_test)
     acc = accuracy_score(y_test, preds)
     print(f"Params: {params}, Accuracy: {acc:.4f}")
