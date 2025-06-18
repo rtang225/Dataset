@@ -3,7 +3,6 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
-from sklearn.utils.class_weight import compute_class_weight
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -53,13 +52,13 @@ class BasicMLP(nn.Module):
         super().__init__()
         self.fc1 = nn.Linear(num_features, 128)
         self.relu1 = nn.ReLU()
-        self.dropout1 = nn.Dropout(0.2)
+        self.dropout1 = nn.Dropout(0.4)
         self.fc2 = nn.Linear(128, 64)
         self.relu2 = nn.ReLU()
-        self.dropout2 = nn.Dropout(0.2)
+        self.dropout2 = nn.Dropout(0.4)
         self.fc3 = nn.Linear(64, 32)
         self.relu3 = nn.ReLU()
-        self.dropout3 = nn.Dropout(0.2)
+        self.dropout3 = nn.Dropout(0.4)
         self.fc4 = nn.Linear(32, num_classes)
     def forward(self, x):
         x = self.relu1(self.fc1(x))
@@ -73,18 +72,14 @@ class BasicMLP(nn.Module):
 
 num_classes = len(np.unique(y))
 num_features = X_train.shape[1]
-# print(f"Number of features: {num_features}, Number of classes: {num_classes}")
 model = BasicMLP(num_features, num_classes).to(device)
-# print(model)
 
 # Training setup
-class_weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
-class_weights = torch.tensor(class_weights, dtype=torch.float32).to(device)
-criterion = nn.CrossEntropyLoss(weight=class_weights)
-optimizer = optim.Adam(model.parameters(), lr=0.00001, weight_decay=0.001)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 # Training loop
-num_epochs = 200
+num_epochs = 100
 train_losses = []
 val_losses = []
 train_accuracies = []
@@ -146,6 +141,8 @@ with torch.no_grad():
     print('Classification Report:')
     print(classification_report(y_test, preds, digits=3))
     print(np.bincount(preds))
+print(np.bincount(y_train))
+print(np.bincount(y_test))
 
 # Plot training and validation loss
 import matplotlib.pyplot as plt
