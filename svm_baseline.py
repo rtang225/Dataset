@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split, ParameterGrid
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
@@ -9,7 +9,7 @@ from imblearn.over_sampling import SMOTE
 
 # Load the dataset
 file_path = 'datasetreduced.csv'
-df = pd.read_csv(file_path, usecols=['temperature_2m_mean','wind_speed_10m_max', 'relative_humidity_2m_mean', 'wind_speed_10m_mean', 'vapour_pressure_deficit_max', 'area_class', 'apparent_temperature_mean', 'rain_sum', 'soil_moisture_0_to_7cm_mean', 'soil_moisture_7_to_28cm_mean', 'dew_point_2m_mean'])#, 'wind_gusts_10m_max', 'wind_gusts_10m_mean', 'soil_moisture_0_to_100cm_mean', 'wet_bulb_temperature_2m_mean'])#, 'vNDVI', 'VARI'])
+df = pd.read_csv(file_path, usecols=['temperature_2m_mean','wind_speed_10m_max', 'relative_humidity_2m_mean', 'wind_speed_10m_mean', 'vapour_pressure_deficit_max', 'area_class', 'apparent_temperature_mean', 'rain_sum', 'soil_moisture_0_to_7cm_mean', 'soil_moisture_7_to_28cm_mean', 'dew_point_2m_mean', 'vNDVI', 'VARI', 'wind_gusts_10m_max', 'wind_gusts_10m_mean', 'soil_moisture_0_to_100cm_mean', 'wet_bulb_temperature_2m_mean'])#])
 print(df.head())
 
 # Prepare features and target
@@ -36,39 +36,16 @@ X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, 
 smote = SMOTE(random_state=42)
 X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
 
-# Train SVM with manual grid search
-param_grid = {
-    'C': [0.1, 1, 10],
-    'kernel': ['linear', 'rbf', 'poly'],
-    'gamma': ['scale', 'auto'],
-    'degree': [2, 3, 4]  # Only used for 'poly' kernel
-}
-
-svc = SVC(class_weight='balanced', probability=True)
-param_list = list(ParameterGrid(param_grid))
-print('Tuning SVM parameters...')
-best_score = 0
-best_params = None
-for params in tqdm(param_list, desc='SVM Grid Search'):
-    # Only set degree if kernel is 'poly'
-    if params['kernel'] != 'poly':
-        params = {k: v for k, v in params.items() if k != 'degree'}
-    clf = SVC(**params, class_weight='balanced', probability=True)
-    # Train SVM with progress bar
-    print('Training SVM...')
-    for _ in tqdm(range(1), desc='SVM Training'):
-        clf.fit(X_resampled, y_resampled)
-    preds = clf.predict(X_test)
-    acc = accuracy_score(y_test, preds)
-    print(f"Params: {params}, Accuracy: {acc:.4f}")
-    if acc > best_score:
-        best_score = acc
-        best_params = params
-print(f"Best parameters: {best_params}")
-print(f"Best test accuracy: {best_score:.4f}")
+# Train SVM
+print('Training SVM...')
+clf = SVC(C=100, kernel='rbf', gamma='auto', class_weight='balanced', probability=True)
+clf.fit(X_train, y_train)
+preds = clf.predict(X_test)
+acc = accuracy_score(y_test, preds)
+print(f"Accuracy: {acc:.4f}")
 
 # Evaluate
-best_clf = SVC(**best_params, class_weight='balanced', probability=True)
+best_clf = SVC(C=100, kernel='rbf', gamma='auto', class_weight='balanced', probability=True)
 best_clf.fit(X_train, y_train)
 preds = best_clf.predict(X_test)
 acc = accuracy_score(y_test, preds)
