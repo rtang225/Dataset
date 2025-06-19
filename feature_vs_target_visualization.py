@@ -33,4 +33,5 @@ for col in features:
     plt.plot(x_vals, norm_pdf_scaled, 'r--', label=f'Normal Distribution ({col})')
     plt.legend()
     plt.tight_layout()
-    plt.show()
+    plt.savefig(f'{col}_vs_area_normal.png')
+    plt.close()
