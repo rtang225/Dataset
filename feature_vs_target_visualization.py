@@ -2,6 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import os
 
 # Load the dataset
 file_path = 'initialexport.csv'
@@ -13,6 +14,10 @@ df = df[df['area'] <= upper_bound]
 
 # Assume 'area' is the target column
 features = [col for col in df.columns if col != 'area']
+
+# Create output directory if it doesn't exist
+output_dir = 'Feature Graphs'
+os.makedirs(output_dir, exist_ok=True)
 
 # Plot each feature with normal distribution overlay
 for col in features:
@@ -33,5 +38,5 @@ for col in features:
     plt.plot(x_vals, norm_pdf_scaled, 'r--', label=f'Normal Distribution ({col})')
     plt.legend()
     plt.tight_layout()
-    plt.savefig(f'{col}_vs_area_normal.png')
+    plt.savefig(os.path.join(output_dir, f'{col}_vs_area_normal99.png'))
     plt.close()
