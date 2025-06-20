@@ -1,0 +1,111 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import mean_squared_error, r2_score
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import TensorDataset, DataLoader
+import matplotlib.pyplot as plt
+
+# Load the dataset
+df = pd.read_csv('dataset.csv')
+
+# Encode non-numeric columns (except target)
+for col in df.columns:
+    if df[col].dtype == 'O' and col != 'area':
+        df[col] = LabelEncoder().fit_transform(df[col].astype(str))
+
+# Assume 'area' is the target column (change if needed)
+X = df.drop(['area_class'], axis=1, errors='ignore')
+y = df['area_class']
+
+# Standardize features
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# Train/test split
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+
+# Convert to torch tensors
+X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
+X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
+y_train_tensor = torch.tensor(y_train.values, dtype=torch.float32).view(-1, 1)
+y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32).view(-1, 1)
+
+train_ds = TensorDataset(X_train_tensor, y_train_tensor)
+test_ds = TensorDataset(X_test_tensor, y_test_tensor)
+train_loader = DataLoader(train_ds, batch_size=32, shuffle=True)
+test_loader = DataLoader(test_ds, batch_size=32)
+
+# Define a simple neural network regressor
+class SimpleRegressor(nn.Module):
+    def __init__(self, num_features):
+        super().__init__()
+        self.fc1 = nn.Linear(num_features, 64)
+        self.relu1 = nn.ReLU()
+        self.fc2 = nn.Linear(64, 32)
+        self.relu2 = nn.ReLU()
+        self.fc3 = nn.Linear(32, 1)
+    def forward(self, x):
+        x = self.relu1(self.fc1(x))
+        x = self.relu2(self.fc2(x))
+        x = self.fc3(x)
+        return x
+
+num_features = X_train.shape[1]
+model = SimpleRegressor(num_features)
+
+criterion = nn.MSELoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+num_epochs = 50
+train_losses = []
+val_losses = []
+for epoch in range(num_epochs):
+    model.train()
+    running_loss = 0.0
+    for xb, yb in train_loader:
+        optimizer.zero_grad()
+        out = model(xb)
+        loss = criterion(out, yb)
+        loss.backward()
+        optimizer.step()
+        running_loss += loss.item() * xb.size(0)
+    train_loss = running_loss / len(train_loader.dataset)
+    train_losses.append(train_loss)
+    # Validation
+    model.eval()
+    val_running_loss = 0.0
+    with torch.no_grad():
+        for xb, yb in test_loader:
+            out = model(xb)
+            loss = criterion(out, yb)
+            val_running_loss += loss.item() * xb.size(0)
+    val_loss = val_running_loss / len(test_loader.dataset)
+    val_losses.append(val_loss)
+    if (epoch+1) % 10 == 0 or epoch == 0:
+        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+
+# Final evaluation
+model.eval()
+with torch.no_grad():
+    y_pred = model(X_test_tensor).cpu().numpy().flatten()
+    y_pred = np.round(y_pred)  # Round predictions to the nearest whole number
+    print(y_test, y_pred)
+    mse = mean_squared_error(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
+    print(f'Final Mean Squared Error: {mse:.3f}')
+    print(f'Final R^2 Score: {r2:.3f}')
+
+# Plot training and validation loss
+plt.figure(figsize=(8,5))
+plt.plot(train_losses, label='Train Loss')
+plt.plot(val_losses, label='Validation Loss')
+plt.xlabel('Epoch')
+plt.ylabel('MSE Loss')
+plt.title('Neural Network Regression Training and Validation Loss')
+plt.legend()
+plt.tight_layout()
+plt.show()

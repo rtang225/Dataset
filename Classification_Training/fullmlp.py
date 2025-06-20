@@ -11,13 +11,13 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 # Load the dataset
-file_path = 'datasetreduced.csv'
+file_path = 'datasetreducedclasses.csv'
 df = pd.read_csv(file_path)
 print(df.head())
 
 # Prepare features and target
 y = df['area_class']
-X = df.drop(['area_class', 'date', 'latitude', 'longitude', 'vNDVI', 'VARI'], axis=1, errors='ignore')
+X = df.drop(['area_class', 'date', 'latitude', 'longitude'], axis=1, errors='ignore')
 
 # Encode target if not numeric
 if y.dtype == 'O' or y.dtype.name == 'category':
