@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
@@ -19,9 +20,9 @@ for col in df.columns:
     if df[col].dtype == 'O' and col != 'area':
         df[col] = LabelEncoder().fit_transform(df[col].astype(str))
 
-# Assume 'area_size' is the target column (change if needed)
-y = np.log1p(df['area'])
+# Assume 'area' is the target column (change if needed)
 X = df.drop(['area'], axis=1, errors='ignore')
+y = df['area']
 
 # Standardize features
 scaler = StandardScaler()
@@ -29,6 +30,11 @@ X_scaled = scaler.fit_transform(X)
 
 # Train/test split
 X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+
+# Apply bins and labels to y_test only
+bins = [0, 0.1, 1.0, 10, 100, 1000, 10000, 100000, float('inf')]
+labels = [0, 1, 2, 3, 4, 5, 6, 7]
+y_test = pd.cut(y_test, bins=bins, labels=labels, include_lowest=True)
 
 # Convert to torch tensors
 X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
@@ -62,9 +68,11 @@ model = SimpleRegressor(num_features)
 criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.1)
 
-num_epochs = 250
+num_epochs = 20
 train_losses = []
 val_losses = []
+train_accuracies = []
+val_accuracies = []
 for epoch in range(num_epochs):
     model.train()
     running_loss = 0.0
@@ -80,25 +88,39 @@ for epoch in range(num_epochs):
     # Validation
     model.eval()
     val_running_loss = 0.0
+    val_correct = 0
+    val_total = 0
     with torch.no_grad():
         for xb, yb in test_loader:
             out = model(xb)
             loss = criterion(out, yb)
             val_running_loss += loss.item() * xb.size(0)
-    val_loss = val_running_loss / len(test_loader.dataset)
+            preds = torch.argmax(out, dim=1)
+            val_correct += (preds == yb).sum().item()
+            val_total += yb.size(0)
+    val_loss = val_running_loss / val_total
+    val_acc = val_correct / val_total
     val_losses.append(val_loss)
-    if (epoch+1) % 10 == 0 or epoch == 0:
+    val_accuracies.append(val_acc)
+    if (epoch+1) % 5 == 0 or epoch == 0:
         print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
 # Final evaluation
 model.eval()
 with torch.no_grad():
     y_pred = model(X_test_tensor).cpu().numpy().flatten()
-    y_pred = np.expm1(y_pred)
-    mse = mean_squared_error(np.expm1(y_test), y_pred)
-    r2 = r2_score(np.expm1(y_test), y_pred)
-    print(f'Final Mean Squared Error: {mse:.3f}')
-    print(f'Final R^2 Score: {r2:.3f}')
+    y_pred = pd.cut(y_pred, bins=bins, labels=labels, include_lowest=True)
+    print(y_test)
+    print(y_pred)
+    acc = accuracy_score(y_test, y_pred)
+    print(f'Test accuracy: {acc:.3f}')
+    # Confusion matrix and classification report
+    cm = confusion_matrix(y_test, y_pred)
+    print('Confusion Matrix:')
+    print(cm)
+    print('Classification Report:')
+    print(classification_report(y_test, y_pred, digits=3))
+    print(np.bincount(y_pred))
 
 # Plot training and validation loss
 plt.figure(figsize=(8,5))
