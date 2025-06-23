@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_squared_error, r2_score, classification_report, confusion_matrix, accuracy_score
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -19,7 +19,7 @@ for col in df.columns:
 
 # Assume 'area' is the target column (change if needed)
 X = df.drop(['area'], axis=1, errors='ignore')
-y = np.log1p(df['area'])
+y = np.log10(df['area']+1)
 
 # Standardize features
 scaler = StandardScaler()
@@ -44,23 +44,37 @@ class SimpleRegressor(nn.Module):
     def __init__(self, num_features):
         super().__init__()
         self.fc1 = nn.Linear(num_features, 64)
-        self.relu1 = nn.ReLU()
+        self.elu1 = nn.ELU()
         self.fc2 = nn.Linear(64, 32)
-        self.relu2 = nn.ReLU()
-        self.fc3 = nn.Linear(32, 1)
+        self.elu2 = nn.ELU()
+        self.fc3 = nn.Linear(32, 16)
+        self.elu3 = nn.ELU()
+        self.fc4 = nn.Linear(16, 8)
+        self.elu4 = nn.ELU()
+        self.fc5 = nn.Linear(8, 1)
     def forward(self, x):
-        x = self.relu1(self.fc1(x))
-        x = self.relu2(self.fc2(x))
-        x = self.fc3(x)
+        x = self.elu1(self.fc1(x))
+        x = self.elu2(self.fc2(x))
+        x = self.elu3(self.fc3(x))
+        x = self.elu4(self.fc4(x))
+        x = self.fc5(x)
         return x
 
 num_features = X_train.shape[1]
 model = SimpleRegressor(num_features)
 
-criterion = nn.MSELoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+# Define log-cosh loss
+class LogCoshLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, y_pred, y_true):
+        return torch.mean(torch.log(torch.cosh(y_pred - y_true + 1e-12)))
 
-num_epochs = 50
+# Replace criterion with log-cosh loss
+criterion = nn.MSELoss()  # Using MSELoss for simplicity, can be replaced with LogCoshLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
+
+num_epochs = 100
 train_losses = []
 val_losses = []
 for epoch in range(num_epochs):
@@ -92,17 +106,43 @@ for epoch in range(num_epochs):
 model.eval()
 with torch.no_grad():
     y_pred = model(X_test_tensor).cpu().numpy().flatten()
+    y_pred_rounded = np.floor(y_pred)
+    y_pred_rounded = np.where(y_pred_rounded > 3, 3, y_pred_rounded)
     # y_pred = np.expm1(y_pred)
     # y_true = np.expm1(y_test)
     y_true = y_test
+    y_true_rounded = np.floor(y_true)
+    y_true_rounded = np.where(y_true_rounded > 3, 3, y_true_rounded)
+    print(y_pred, y_true, y_pred_rounded, y_true_rounded)
+    # Regression metrics
     mse = mean_squared_error(y_true, y_pred)
+    mse_rounded = mean_squared_error(y_true_rounded, y_pred_rounded)
     r2 = r2_score(y_true, y_pred)
+    r2_rounded = r2_score(y_true_rounded, y_pred_rounded)
     mae = np.mean(np.abs(y_true - y_pred))
+    mae_rounded = np.mean(np.abs(y_true_rounded - y_pred_rounded))
     rmse = np.sqrt(mse)
+    rmse_rounded = np.sqrt(mse_rounded)
     print(f'Final Mean Squared Error: {mse:.3f}')
     print(f'Final Root Mean Squared Error: {rmse:.3f}')
     print(f'Final Mean Absolute Error: {mae:.3f}')
     print(f'Final R^2 Score: {r2:.3f}')
+
+    # Classification metrics for rounded values
+    print('Classification Report (Rounded):')
+    print(classification_report(y_true_rounded, y_pred_rounded, digits=3))
+    print('Confusion Matrix (Rounded):')
+    print(confusion_matrix(y_true_rounded, y_pred_rounded))
+    acc = accuracy_score(y_true_rounded, y_pred_rounded)
+    print(f'Accuracy (Rounded): {acc:.3f}')
+    # List the number of data for each class in the final validation test
+    unique, counts = np.unique(y_true_rounded, return_counts=True)
+    total = len(y_true_rounded)
+    print('Number of samples per class in y_true_rounded:')
+    for u, c in zip(unique, counts):
+        percent = 100 * c / total
+        print(f'Class {int(u)}: {c} ({percent:.2f}%)')
+
     # Scatter plot: True vs Predicted
     plt.figure(figsize=(6,6))
     plt.scatter(y_true, y_pred, alpha=0.5)
@@ -110,16 +150,6 @@ with torch.no_grad():
     plt.xlabel('True Area')
     plt.ylabel('Predicted Area')
     plt.title('True vs Predicted Area')
-    plt.tight_layout()
-    plt.show()
-    # Residual plot
-    residuals = y_true - y_pred
-    plt.figure(figsize=(6,4))
-    plt.scatter(y_pred, residuals, alpha=0.5)
-    plt.axhline(0, color='r', linestyle='--')
-    plt.xlabel('Predicted Area')
-    plt.ylabel('Residuals')
-    plt.title('Residual Plot')
     plt.tight_layout()
     plt.show()
 
