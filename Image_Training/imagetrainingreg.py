@@ -12,6 +12,7 @@ import os
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from sklearn.utils.class_weight import compute_class_weight
+from sklearn.metrics import mean_squared_error, r2_score, classification_report, confusion_matrix, accuracy_score
 
 # Updated image extraction from coordinates
 IMAGE_FOLDER = 'images\\wildfire'
@@ -44,7 +45,7 @@ class ImageCoordDataset(Dataset):
     def __getitem__(self, idx):
         lat = self.data.iloc[idx]['latitude']
         lon = self.data.iloc[idx]['longitude']
-        target = np.log1p(self.data.iloc[idx]['area'])  # Use regression target
+        target = np.log10(self.data.iloc[idx]['area']+1)  # Use regression target
         img = get_image_from_coords(lat, lon)
         if self.transform:
             img = self.transform(img)
@@ -92,15 +93,16 @@ class SimpleCNNRegressor(nn.Module):
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = SimpleCNNRegressor().to(device)
+print(f"Using device: {device}")
 
 # Training setup for regression
 criterion = nn.MSELoss()
-optimizer = optim.Adam(model.parameters(), lr=0.000001, weight_decay=1e-5)
+optimizer = optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
 
 # Training loop
 train_losses = []
 val_losses = []
-num_epochs = 25
+num_epochs = 10
 for epoch in range(num_epochs):
     model.train()
     running_loss = 0.0
@@ -155,11 +157,31 @@ preds = np.concatenate(preds)
 targets_all = np.concatenate(targets_all)
 #preds_inverted = np.expm1(preds)
 #targets_inverted = np.expm1(targets_all)
-preds_inverted = preds
-targets_inverted = targets_all
-from sklearn.metrics import mean_squared_error, r2_score
-mse = mean_squared_error(targets_inverted, preds_inverted)
-r2 = r2_score(targets_inverted, preds_inverted)
+preds_rounded = np.floor(preds)
+preds_rounded = np.clip(preds_rounded, 0, 3)
+targets_rounded = np.floor(targets_all)
+targets_rounded = np.clip(targets_rounded, 0, 3)
+print(f'Predictions: {preds[:100]}')
+print(f'Targets: {targets_all[:100]}')
+print(f'Rounded Predictions: {preds_rounded[:100]}')
+print(f'Rounded Targets: {targets_rounded[:100]}')
+mse = mean_squared_error(targets_all, preds)
+r2 = r2_score(targets_all, preds)
 print(f'Final Validation Loss: {val_losses[-1]:.4f}')
-print(f'Final MSE (inverted): {mse:.4f}')
-print(f'Final R^2 Score (inverted): {r2:.4f}')
+print(f'Final MSE: {mse:.4f}')
+print(f'Final R^2 Score: {r2:.4f}')
+
+# Classification metrics for rounded values
+print('Classification Report (Rounded):')
+print(classification_report(targets_rounded, preds_rounded, digits=3))
+print('Confusion Matrix (Rounded):')
+print(confusion_matrix(targets_rounded, preds_rounded))
+acc = accuracy_score(targets_rounded, preds_rounded)
+print(f'Accuracy (Rounded): {acc:.3f}')
+# List the number of data for each class in the final validation test
+unique, counts = np.unique(targets_rounded, return_counts=True)
+total = len(targets_rounded)
+print('Number of samples per class in y_true_rounded:')
+for u, c in zip(unique, counts):
+    percent = 100 * c / total
+    print(f'Class {int(u)}: {c} ({percent:.2f}%)')

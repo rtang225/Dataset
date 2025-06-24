@@ -10,7 +10,9 @@ from torch.utils.data import TensorDataset, DataLoader
 import matplotlib.pyplot as plt
 
 # Load the dataset
-df = pd.read_csv('initialexport.csv')
+file_path = 'initialexport.csv'
+df = pd.read_csv(file_path, usecols=['temperature_2m_mean','wind_speed_10m_max', 'relative_humidity_2m_mean', 'wind_speed_10m_mean', 'vapour_pressure_deficit_max', 'vNDVI', 'VARI', 'area', 'apparent_temperature_mean', 'rain_sum'])#, 'soil_moisture_0_to_7cm_mean', 'soil_moisture_7_to_28cm_mean', 'dew_point_2m_mean'])#, 'wind_gusts_10m_max', 'wind_gusts_10m_mean', 'soil_moisture_0_to_100cm_mean', 'wet_bulb_temperature_2m_mean'])
+df = pd.read_csv(file_path)
 
 # Encode non-numeric columns (except target)
 for col in df.columns:
@@ -18,8 +20,8 @@ for col in df.columns:
         df[col] = LabelEncoder().fit_transform(df[col].astype(str))
 
 # Assume 'area' is the target column (change if needed)
-X = df.drop(['area'], axis=1, errors='ignore')
 y = np.log10(df['area']+1)
+X = df.drop(['area'], axis=1, errors='ignore')
 
 # Standardize features
 scaler = StandardScaler()
@@ -108,11 +110,13 @@ with torch.no_grad():
     y_pred = model(X_test_tensor).cpu().numpy().flatten()
     y_pred_rounded = np.floor(y_pred)
     y_pred_rounded = np.where(y_pred_rounded > 3, 3, y_pred_rounded)
+    y_pred_rounded = np.where(y_pred_rounded < 0, 0, y_pred_rounded)
     # y_pred = np.expm1(y_pred)
     # y_true = np.expm1(y_test)
     y_true = y_test
     y_true_rounded = np.floor(y_true)
     y_true_rounded = np.where(y_true_rounded > 3, 3, y_true_rounded)
+    y_pred_rounded = np.where(y_pred_rounded < 0, 0, y_pred_rounded)
     print(y_pred, y_true, y_pred_rounded, y_true_rounded)
     # Regression metrics
     mse = mean_squared_error(y_true, y_pred)
