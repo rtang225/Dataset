@@ -155,23 +155,28 @@ with torch.no_grad():
         targets_all.append(targets.cpu().numpy())
 preds = np.concatenate(preds)
 targets_all = np.concatenate(targets_all)
-#preds_inverted = np.expm1(preds)
-#targets_inverted = np.expm1(targets_all)
-preds_rounded = np.floor(preds)
+preds_inverted = 10**(preds-1)
+targets_inverted = 10**(targets_all-1)
+"""preds_rounded = np.floor(preds)
 preds_rounded = np.clip(preds_rounded, 0, 3)
 targets_rounded = np.floor(targets_all)
-targets_rounded = np.clip(targets_rounded, 0, 3)
-print(f'Predictions: {preds[:100]}')
+targets_rounded = np.clip(targets_rounded, 0, 3)"""
+"""print(f'Predictions: {preds[:100]}')
 print(f'Targets: {targets_all[:100]}')
 print(f'Rounded Predictions: {preds_rounded[:100]}')
-print(f'Rounded Targets: {targets_rounded[:100]}')
+print(f'Rounded Targets: {targets_rounded[:100]}')"""
 mse = mean_squared_error(targets_all, preds)
 r2 = r2_score(targets_all, preds)
+mse_inverted = mean_squared_error(targets_inverted, preds_inverted)
+r2_inverted = r2_score(targets_inverted, preds_inverted)
+
 print(f'Final Validation Loss: {val_losses[-1]:.4f}')
 print(f'Final MSE: {mse:.4f}')
 print(f'Final R^2 Score: {r2:.4f}')
+print(f'Final MSE (Inverted): {mse_inverted:.4f}')
+print(f'Final R^2 Score (Inverted): {r2_inverted:.4f}')
 
-# Classification metrics for rounded values
+"""# Classification metrics for rounded values
 print('Classification Report (Rounded):')
 print(classification_report(targets_rounded, preds_rounded, digits=3))
 print('Confusion Matrix (Rounded):')
@@ -184,4 +189,4 @@ total = len(targets_rounded)
 print('Number of samples per class in y_true_rounded:')
 for u, c in zip(unique, counts):
     percent = 100 * c / total
-    print(f'Class {int(u)}: {c} ({percent:.2f}%)')
+    print(f'Class {int(u)}: {c} ({percent:.2f}%)')"""

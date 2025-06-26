@@ -92,7 +92,7 @@ for epoch in range(num_epochs):
 model.eval()
 with torch.no_grad():
     y_pred = model(X_test_tensor).cpu().numpy().flatten()
-    y_pred = np.round(y_pred)  # Round predictions to the nearest whole number
+    # y_pred = np.round(y_pred)  # Round predictions to the nearest whole number
     print(y_test, y_pred)
     mse = mean_squared_error(y_test, y_pred)
     r2 = r2_score(y_test, y_pred)
