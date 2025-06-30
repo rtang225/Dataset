@@ -7,7 +7,7 @@ import time
 import datetime
 
 # Read the CSV file and select only the required columns
-df = pd.read_csv('originaldata.csv', usecols=['DATE_DEBUT', 'LATITUDE', 'LONGITUDE', 'SUP_HA'])
+df = pd.read_csv('fp-historical-wildfire-data-cleaned.csv', usecols=['FIRE_START_DATE', 'LATITUDE', 'LONGITUDE', 'CURRENT_SIZE'])
 
 # Setup the Open-Meteo API client with cache and retry on error
 cache_session = requests_cache.CachedSession('.cache', expire_after = -1)
@@ -19,13 +19,13 @@ hour_start = time.time()
 
 # For each row in the CSV, fetch weather data for the date and location
 for index, row in df.iterrows():    
-    date = row['DATE_DEBUT']
+    date = row['FIRE_START_DATE']
     lat = row['LATITUDE']
     lon = row['LONGITUDE']
-    area = row['SUP_HA']
+    area = row['CURRENT_SIZE']
     url = "https://customer-archive-api.open-meteo.com/v1/archive"
     try:
-        date = datetime.datetime.strptime(date, '%Y-%m-%d').date()
+        date = datetime.datetime.strptime(date, '%m/%d/%Y %H:%M').date()
     except Exception as e:
         continue
     params = {
@@ -33,7 +33,8 @@ for index, row in df.iterrows():
         "longitude": lon,
         "start_date": date - datetime.timedelta(days=7),
         "end_date": date,
-        "hourly": ["temperature_2m", "relative_humidity_2m", "dew_point_2m", "apparent_temperature", "precipitation", "rain", "pressure_msl", "surface_pressure", "cloud_cover", "vapour_pressure_deficit", "wind_speed_10m", "wind_speed_100m", "wind_direction_10m", "wind_direction_100m", "soil_temperature_0_to_7cm", "soil_temperature_7_to_28cm", "soil_temperature_28_to_100cm", "soil_temperature_100_to_255cm", "soil_moisture_0_to_7cm", "soil_moisture_7_to_28cm", "soil_moisture_28_to_100cm", "soil_moisture_100_to_255cm", "et0_fao_evapotranspiration", "wind_gusts_10m", "cloud_cover_low", "cloud_cover_mid", "cloud_cover_high"]
+        "hourly": ["temperature_2m", "relative_humidity_2m", "dew_point_2m", "apparent_temperature", "precipitation", "rain", "pressure_msl", "surface_pressure", "cloud_cover", "vapour_pressure_deficit", "wind_speed_10m", "wind_speed_100m", "wind_direction_10m", "wind_direction_100m", "soil_temperature_0_to_7cm", "soil_temperature_7_to_28cm", "soil_temperature_28_to_100cm", "soil_temperature_100_to_255cm", "soil_moisture_0_to_7cm", "soil_moisture_7_to_28cm", "soil_moisture_28_to_100cm", "soil_moisture_100_to_255cm", "et0_fao_evapotranspiration", "wind_gusts_10m", "cloud_cover_low", "cloud_cover_mid", "cloud_cover_high"],
+        "apikey": "14P5w4g2sL9XCSX3"
     }
     responses = openmeteo.weather_api(url, params=params)
     response = responses[0]
@@ -113,5 +114,5 @@ for index, row in df.iterrows():
     print(hourly_dataframe)
 
     # Write or append to CSV
-    file_exists = os.path.isfile('week.csv')
-    hourly_dataframe.to_csv('week.csv', mode='a', header=not file_exists, index=False)
+    file_exists = os.path.isfile('secondset.csv')
+    hourly_dataframe.to_csv('secondset.csv', mode='a', header=not file_exists, index=False)
