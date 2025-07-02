@@ -5,3 +5,5 @@ regression_to_classification/
 Feature Graphs/
 week.csv
 secondset.csv
+week_sequences.npy
+week_targets.npy
