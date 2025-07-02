@@ -73,8 +73,8 @@ model = model.to(device)
 
 # Training setup
 criterion = nn.MSELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-num_epochs = 100
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-3)
+num_epochs = 20
 train_losses = []
 val_losses = []
 
