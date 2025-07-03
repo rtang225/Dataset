@@ -41,19 +41,20 @@ class WeekSequenceDataset(Dataset):
 
 train_dataset = WeekSequenceDataset(train_seqs_padded, train_targets)
 test_dataset = WeekSequenceDataset(test_seqs_padded, test_targets)
-train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=16)
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=32)
 
 # LSTM Model
 class SimpleLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size=32, num_layers=1):
+    def __init__(self, input_size, hidden_size=32, num_layers=2):
         super().__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+        self.sigmoid = nn.Sigmoid()
         self.fc = nn.Linear(hidden_size, 1)
     def forward(self, x):
         out, _ = self.lstm(x)
         out = out[:, -1, :]  # Use last output
-        out = self.fc(out)
+        out = self.sigmoid(self.fc(out))
         return out.squeeze(1)
 
 # Example usage
@@ -74,7 +75,7 @@ model = model.to(device)
 # Training setup
 criterion = nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-3)
-num_epochs = 20
+num_epochs = 25
 train_losses = []
 val_losses = []
 
