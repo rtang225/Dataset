@@ -3,13 +3,13 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
-from sklearn.metrics import mean_squared_error, r2_score, classification_report, confusion_matrix, accuracy_score
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from torch.nn.utils.rnn import pad_sequence
 
 sequences = np.load('week_sequences.npy', allow_pickle=True)
-targets = np.log10(np.load('week_targets.npy', allow_pickle=True)+1)
+targets = np.load('week_targets.npy', allow_pickle=True)
 
 # Replace NaN values in sequences and targets with 0.0
 sequences = [np.nan_to_num(s, nan=0.0) for s in sequences]
@@ -20,11 +20,15 @@ remove = []
 for i in range(len(sequences)):
     if len(sequences[i]) > 168:
         remove.insert(0, i)
-
 for i in range(len(remove)):
     idx = remove[i]
     sequences.pop(idx)
     targets = np.delete(targets, idx)
+
+# Bin targets into classes (example: 4 classes)
+bins = [0, 0.1, 1, 10, float('inf')]
+labels = list(range(len(bins)-1))
+target_classes = np.digitize(targets, bins, right=False) - 1
 
 # Train/test split
 indices = np.arange(len(sequences))
@@ -33,13 +37,12 @@ train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=42)
 seq_tensors = [torch.tensor(s, dtype=torch.float32) for s in sequences]
 train_seqs = [seq_tensors[i] for i in train_idx]
 test_seqs = [seq_tensors[i] for i in test_idx]
-train_targets = torch.tensor(targets[train_idx], dtype=torch.float32)
-test_targets = torch.tensor(targets[test_idx], dtype=torch.float32)
+train_targets = torch.tensor(target_classes[train_idx], dtype=torch.long)
+test_targets = torch.tensor(target_classes[test_idx], dtype=torch.long)
 
 train_seqs_padded = pad_sequence(train_seqs, batch_first=True)
 test_seqs_padded = pad_sequence(test_seqs, batch_first=True)
 
-# Custom Dataset
 class WeekSequenceDataset(Dataset):
     def __init__(self, X, y):
         self.X = X
@@ -51,41 +54,36 @@ class WeekSequenceDataset(Dataset):
 
 train_dataset = WeekSequenceDataset(train_seqs_padded, train_targets)
 test_dataset = WeekSequenceDataset(test_seqs_padded, test_targets)
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=32)
+train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=16)
 
-# LSTM Model
-class SimpleLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size=32, num_layers=3):
+# LSTM Classifier
+class SimpleLSTMClassifier(nn.Module):
+    def __init__(self, input_size, hidden_size=32, num_layers=3, num_classes=4):
         super().__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-        self.elu = nn.ELU()
-        self.fc = nn.Linear(hidden_size, 1)
+        self.fc = nn.Linear(hidden_size, num_classes)
     def forward(self, x):
         out, _ = self.lstm(x)
         out = out[:, -1, :]  # Use last output
-        out = self.elu(self.fc(out))
-        return out.squeeze(1)
+        out = self.fc(out)
+        return out
 
-# Example usage
 input_size = train_seqs_padded.shape[2]
-model = SimpleLSTM(input_size)
+num_classes = len(labels)
+model = SimpleLSTMClassifier(input_size, num_classes=num_classes)
 
-# Check device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
-
-# Move data and model to device
 train_seqs_padded = train_seqs_padded.to(device)
 test_seqs_padded = test_seqs_padded.to(device)
 train_targets = train_targets.to(device)
 test_targets = test_targets.to(device)
 model = model.to(device)
 
-# Training setup
-criterion = nn.MSELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
-num_epochs = 75
+criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-3)
+num_epochs = 25
 train_losses = []
 val_losses = []
 
@@ -103,7 +101,6 @@ for epoch in range(num_epochs):
         running_loss += loss.item() * xb.size(0)
     train_loss = running_loss / len(train_loader.dataset)
     train_losses.append(train_loss)
-
     # Validation
     model.eval()
     val_running_loss = 0.0
@@ -120,47 +117,31 @@ for epoch in range(num_epochs):
 
 # Evaluation
 model.eval()
-preds = []
-trues = []
+all_preds = []
+all_trues = []
 with torch.no_grad():
     for xb, yb in test_loader:
         xb = xb.to(device)
         yb = yb.to(device)
         out = model(xb)
-        preds.append(out.cpu().numpy())
-        trues.append(yb.cpu().numpy())
-preds = np.concatenate(preds)
-trues = np.concatenate(trues)
-preds_rounded = np.floor(preds)
-preds_rounded = np.clip(preds_rounded, 0, 3)
-trues_rounded = np.floor(trues)
-trues_rounded = np.clip(trues_rounded, 0, 3)
+        preds = torch.argmax(out, dim=1)
+        all_preds.append(preds.cpu().numpy())
+        all_trues.append(yb.cpu().numpy())
+all_preds = np.concatenate(all_preds)
+all_trues = np.concatenate(all_trues)
 
-# Final evaluation metrics
-mse = mean_squared_error(trues, preds)
-r2 = r2_score(trues, preds)
-print(f"Final MSE: {mse:.4f}")
-print(f"Final R^2: {r2:.4f}")
+print('Classification Report:')
+print(classification_report(all_trues, all_preds, digits=3))
+print('Confusion Matrix:')
+print(confusion_matrix(all_trues, all_preds))
+acc = accuracy_score(all_trues, all_preds)
+print(f'Accuracy: {acc:.3f}')
 
-print('Classification Report (Rounded):')
-print(classification_report(trues_rounded, preds_rounded, digits=3))
-print('Confusion Matrix (Rounded):')
-print(confusion_matrix(trues_rounded, preds_rounded))
-acc = accuracy_score(trues_rounded, preds_rounded)
-print(f'Accuracy (Rounded): {acc:.3f}')
-# List the number of data for each class in the final validation test
-unique, counts = np.unique(trues_rounded, return_counts=True)
-total = len(trues_rounded)
-print('Number of samples per class in y_true_rounded:')
-for u, c in zip(unique, counts):
-    percent = 100 * c / total
-    print(f'Class {int(u)}: {c} ({percent:.2f}%)')
-
-# Plot loss curve
 plt.plot(train_losses, label='Train Loss')
 plt.plot(val_losses, label='Validation Loss')
 plt.xlabel('Epoch')
-plt.ylabel('MSE Loss')
-plt.title('LSTM Training Loss')
+plt.ylabel('CrossEntropy Loss')
+plt.title('LSTM Classification Training and Validation Loss')
 plt.legend()
+plt.tight_layout()
 plt.show()
