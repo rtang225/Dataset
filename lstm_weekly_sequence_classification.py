@@ -54,19 +54,23 @@ class WeekSequenceDataset(Dataset):
 
 train_dataset = WeekSequenceDataset(train_seqs_padded, train_targets)
 test_dataset = WeekSequenceDataset(test_seqs_padded, test_targets)
-train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=16)
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=32)
 
 # LSTM Classifier
 class SimpleLSTMClassifier(nn.Module):
-    def __init__(self, input_size, hidden_size=32, num_layers=3, num_classes=4):
+    def __init__(self, input_size, hidden_size=64, num_layers=3, num_classes=4):
         super().__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
-        self.fc = nn.Linear(hidden_size, num_classes)
+        self.elu1 = nn.ELU()
+        self.fc1 = nn.Linear(hidden_size, 16)
+        self.elu2 = nn.ELU()
+        self.fc2 = nn.Linear(16, num_classes)
     def forward(self, x):
         out, _ = self.lstm(x)
         out = out[:, -1, :]  # Use last output
-        out = self.fc(out)
+        out = self.elu1(self.fc1(out))
+        out = self.elu2(self.fc2(out))
         return out
 
 input_size = train_seqs_padded.shape[2]
@@ -82,8 +86,8 @@ test_targets = test_targets.to(device)
 model = model.to(device)
 
 criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-3)
-num_epochs = 25
+optimizer = torch.optim.Adam(model.parameters(), lr=0.00025, weight_decay=1e-3)
+num_epochs = 100
 train_losses = []
 val_losses = []
 
@@ -136,6 +140,13 @@ print('Confusion Matrix:')
 print(confusion_matrix(all_trues, all_preds))
 acc = accuracy_score(all_trues, all_preds)
 print(f'Accuracy: {acc:.3f}')
+# List the number of data for each class in the final validation test
+unique, counts = np.unique(all_trues, return_counts=True)
+total = len(all_trues)
+print('Number of samples per class in y_true_rounded:')
+for u, c in zip(unique, counts):
+    percent = 100 * c / total
+    print(f'Class {int(u)}: {c} ({percent:.2f}%)')
 
 plt.plot(train_losses, label='Train Loss')
 plt.plot(val_losses, label='Validation Loss')
