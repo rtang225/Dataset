@@ -87,8 +87,8 @@ test_targets = test_targets.to(device)
 model = model.to(device)
 
 criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0002, weight_decay=1e-3)
-num_epochs = 50
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
+num_epochs = 100
 train_losses = []
 val_losses = []
 
@@ -134,6 +134,10 @@ with torch.no_grad():
         all_trues.append(yb.cpu().numpy())
 all_preds = np.concatenate(all_preds)
 all_trues = np.concatenate(all_trues)
+
+# Save predictions and true labels
+# np.save('transformer_preds.npy', all_preds)
+# np.save('all_trues.npy', all_trues)
 
 print('Classification Report:')
 print(classification_report(all_trues, all_preds, digits=3))

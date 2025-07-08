@@ -54,12 +54,12 @@ class WeekSequenceDataset(Dataset):
 
 train_dataset = WeekSequenceDataset(train_seqs_padded, train_targets)
 test_dataset = WeekSequenceDataset(test_seqs_padded, test_targets)
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=32)
+train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=16)
 
 # LSTM Classifier
 class SimpleLSTMClassifier(nn.Module):
-    def __init__(self, input_size, hidden_size=64, num_layers=3, num_classes=4):
+    def __init__(self, input_size, hidden_size=32, num_layers=3, num_classes=4):
         super().__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         self.elu1 = nn.ELU()
@@ -86,8 +86,8 @@ test_targets = test_targets.to(device)
 model = model.to(device)
 
 criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.00025, weight_decay=1e-3)
-num_epochs = 100
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
+num_epochs = 75
 train_losses = []
 val_losses = []
 
@@ -133,6 +133,10 @@ with torch.no_grad():
         all_trues.append(yb.cpu().numpy())
 all_preds = np.concatenate(all_preds)
 all_trues = np.concatenate(all_trues)
+
+# Save predictions and true labels
+# np.save('lstm_preds.npy', all_preds)
+# np.save('all_trues.npy', all_trues)
 
 print('Classification Report:')
 print(classification_report(all_trues, all_preds, digits=3))

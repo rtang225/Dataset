@@ -87,10 +87,17 @@ train_targets = train_targets.to(device)
 test_targets = test_targets.to(device)
 model = model.to(device)
 
+# Define log-cosh loss
+class LogCoshLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, y_pred, y_true):
+        return torch.mean(torch.log(torch.cosh(y_pred - y_true + 1e-12)))
+
 # Training setup
-criterion = nn.MSELoss()
+criterion = LogCoshLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
-num_epochs = 50
+num_epochs = 100
 train_losses = []
 val_losses = []
 
@@ -136,30 +143,12 @@ with torch.no_grad():
         trues.append(yb.cpu().numpy())
 preds = np.concatenate(preds)
 trues = np.concatenate(trues)
-preds_rounded = np.floor(preds)
-preds_rounded = np.clip(preds_rounded, 0, 3)
-trues_rounded = np.floor(trues)
-trues_rounded = np.clip(trues_rounded, 0, 3)
 
 # Final evaluation metrics
 mse = mean_squared_error(trues, preds)
 r2 = r2_score(trues, preds)
 print(f"Final MSE: {mse:.4f}")
 print(f"Final R^2: {r2:.4f}")
-
-print('Classification Report (Rounded):')
-print(classification_report(trues_rounded, preds_rounded, digits=3))
-print('Confusion Matrix (Rounded):')
-print(confusion_matrix(trues_rounded, preds_rounded))
-acc = accuracy_score(trues_rounded, preds_rounded)
-print(f'Accuracy (Rounded): {acc:.3f}')
-# List the number of data for each class in the final validation test
-unique, counts = np.unique(trues_rounded, return_counts=True)
-total = len(trues_rounded)
-print('Number of samples per class in y_true_rounded:')
-for u, c in zip(unique, counts):
-    percent = 100 * c / total
-    print(f'Class {int(u)}: {c} ({percent:.2f}%)')
 
 # Plot loss curve
 plt.plot(train_losses, label='Train Loss')
