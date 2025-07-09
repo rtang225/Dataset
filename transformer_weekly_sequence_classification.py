@@ -59,7 +59,7 @@ test_loader = DataLoader(test_dataset, batch_size=32)
 
 # Transformer Classifier
 class SimpleTransformerClassifier(nn.Module):
-    def __init__(self, input_size, num_classes, seq_len, d_model=64, nhead=4, num_layers=2, dim_feedforward=128, dropout=0.1):
+    def __init__(self, input_size, num_classes, seq_len, d_model=256, nhead=8, num_layers=4, dim_feedforward=256, dropout=0.1):
         super().__init__()
         self.input_proj = nn.Linear(input_size, d_model)
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, dropout=dropout, batch_first=True)
@@ -87,8 +87,8 @@ test_targets = test_targets.to(device)
 model = model.to(device)
 
 criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
-num_epochs = 100
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0005, weight_decay=1e-3)
+num_epochs = 25
 train_losses = []
 val_losses = []
 

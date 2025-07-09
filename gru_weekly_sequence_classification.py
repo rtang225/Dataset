@@ -93,8 +93,8 @@ class_weights = compute_class_weight('balanced', classes=np.unique(train_targets
 class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
 
 criterion = nn.CrossEntropyLoss(weight = class_weights_tensor)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
-num_epochs = 50
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0002, weight_decay=1e-3)
+num_epochs = 100
 train_losses = []
 val_losses = []
 
@@ -142,8 +142,8 @@ all_preds = np.concatenate(all_preds)
 all_trues = np.concatenate(all_trues)
 
 # Save predictions and true labels
-# np.save('gru_preds.npy', all_preds)
-# np.save('all_trues.npy', all_trues)
+np.save('gru_preds.npy', all_preds)
+np.save('all_trues.npy', all_trues)
 
 print('Classification Report:')
 print(classification_report(all_trues, all_preds, digits=3))

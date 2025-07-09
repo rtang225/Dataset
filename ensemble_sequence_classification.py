@@ -19,6 +19,7 @@ num_classes = int(max(lstm_preds.max(), gru_preds.max(), transformer_preds.max()
 lstm_onehot = np.eye(num_classes)[lstm_preds.astype(int)]
 gru_onehot = np.eye(num_classes)[gru_preds.astype(int)]
 transformer_onehot = np.eye(num_classes)[transformer_preds.astype(int)]
+print(lstm_onehot, gru_onehot, transformer_onehot)
 
 ensemble_probs = (
     lstm_weight * lstm_onehot +
