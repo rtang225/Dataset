@@ -70,12 +70,12 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Grid search for transformer parameters
 param_grid = {
-    'd_model': [64, 128, 256],
-    'nhead': [2, 4, 8],
+    'd_model': [64, 128],
+    'nhead': [2, 4],
     'num_layers': [2, 4, 6],
-    'dim_feedforward': [128, 256, 512],
-    'dropout': [0.1, 0.2, 0.3],
-    'lr': [0.0001, 0.0002, 0.0005, 0.001],
+    'dim_feedforward': [256, 512],
+    'dropout': [0.1, 0.2],
+    'lr': [0.0005, 0.001],
 }
 best_acc = 0
 best_params = None
@@ -89,7 +89,7 @@ for d_model, nhead, num_layers, dim_feedforward, dropout, lr in itertools.produc
     model = SimpleTransformerClassifier(input_size, num_classes, seq_len, d_model, nhead, num_layers, dim_feedforward, dropout).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-3)
-    for epoch in range(5):  # Use fewer epochs for grid search
+    for epoch in range(10):  # Use fewer epochs for grid search
         model.train()
         for xb, yb in train_loader:
             xb = xb.to(device)

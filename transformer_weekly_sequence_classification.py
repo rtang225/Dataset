@@ -7,6 +7,7 @@ from sklearn.metrics import classification_report, confusion_matrix, accuracy_sc
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from torch.nn.utils.rnn import pad_sequence
+from sklearn.utils.class_weight import compute_class_weight
 
 sequences = np.load('week_sequences.npy', allow_pickle=True)
 targets = np.load('week_targets.npy', allow_pickle=True)
@@ -59,18 +60,34 @@ test_loader = DataLoader(test_dataset, batch_size=32)
 
 # Transformer Classifier
 class SimpleTransformerClassifier(nn.Module):
-    def __init__(self, input_size, num_classes, seq_len, d_model=256, nhead=8, num_layers=4, dim_feedforward=256, dropout=0.1):
+    def __init__(self, input_size, num_classes, seq_len, d_model=64, nhead=4, num_layers=2, dim_feedforward=256, dropout=0.1):
         super().__init__()
         self.input_proj = nn.Linear(input_size, d_model)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
+        self.positional_encoding = nn.Parameter(self._get_positional_encoding(seq_len + 1, d_model), requires_grad=False)
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, dropout=dropout, batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.attn_pool = nn.Linear(d_model, 1)
         self.fc = nn.Linear(d_model, num_classes)
         self.seq_len = seq_len
+    def _get_positional_encoding(self, seq_len, d_model):
+        position = torch.arange(seq_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-np.log(10000.0) / d_model))
+        pe = torch.zeros(seq_len, d_model)
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        return pe.unsqueeze(0)  # shape (1, seq_len, d_model)
     def forward(self, x):
         x = self.input_proj(x)
+        batch_size = x.size(0)
+        cls_tokens = self.cls_token.expand(batch_size, 1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)  # prepend CLS token
+        x = x + self.positional_encoding[:, :x.size(1), :].to(x.device)
         x = self.transformer_encoder(x)
-        out = x[:, -1, :]  # Use last token
-        out = self.fc(out)
+        # Attention pooling over all tokens (including CLS)
+        attn_weights = torch.softmax(self.attn_pool(x), dim=1)  # (batch, seq_len+1, 1)
+        pooled = torch.sum(attn_weights * x, dim=1)  # (batch, d_model)
+        out = self.fc(pooled)
         return out
 
 input_size = train_seqs_padded.shape[2]
@@ -86,9 +103,13 @@ train_targets = train_targets.to(device)
 test_targets = test_targets.to(device)
 model = model.to(device)
 
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0005, weight_decay=1e-3)
-num_epochs = 25
+# Manual class weights (tunable)
+manual_weights = torch.tensor([0.7, 0.9, 1.25, 0.95], dtype=torch.float32).to(device)  # Example: reduce weight for classes 2 and 3
+
+criterion = nn.CrossEntropyLoss(weight=manual_weights, label_smoothing=0.1)
+# criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001, weight_decay=1e-3)
+num_epochs = 100
 train_losses = []
 val_losses = []
 
@@ -134,10 +155,6 @@ with torch.no_grad():
         all_trues.append(yb.cpu().numpy())
 all_preds = np.concatenate(all_preds)
 all_trues = np.concatenate(all_trues)
-
-# Save predictions and true labels
-# np.save('transformer_preds.npy', all_preds)
-# np.save('all_trues.npy', all_trues)
 
 print('Classification Report:')
 print(classification_report(all_trues, all_preds, digits=3))
