@@ -1,17 +1,15 @@
-import numpy as np
 import torch
 import torch.nn as nn
+import numpy as np
 from torch.utils.data import Dataset, DataLoader
+from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
+from collections import Counter
+from torch.nn.utils.rnn import pad_sequence
 import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_recall_fscore_support, f1_score
-from tqdm import tqdm
-from sklearn.model_selection import StratifiedShuffleSplit
-from torch.nn.utils.rnn import pad_sequence
-from sklearn.utils.class_weight import compute_class_weight
-from collections import Counter
 import seaborn as sns
-from torch.optim.lr_scheduler import CosineAnnealingLR
 
+# Data loading and preprocessing (same as other models)
 sequences = np.load('week_sequences.npy', allow_pickle=True)
 targets = np.load('week_targets.npy', allow_pickle=True)
 sequences = [np.nan_to_num(s, nan=0.0) for s in sequences]
@@ -27,15 +25,27 @@ for i in range(len(remove)):
 bins = [0, 0.1, 1, 10, float('inf')]
 labels = list(range(len(bins)-1))
 target_classes = np.digitize(targets, bins, right=False) - 1
-
-# Stratified train/val split (no oversampling)
 sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
 train_idx, test_idx = next(sss.split(np.arange(len(sequences)), target_classes))
-
+train_target_classes = target_classes[train_idx]
+class_counts = Counter(train_target_classes)
+max_count = max(class_counts.values())
+indices_by_class = {c: np.where(train_target_classes == c)[0] for c in class_counts}
+all_train_indices = []
+for c, idxs in indices_by_class.items():
+    n_to_add = max_count - len(idxs)
+    if n_to_add > 0:
+        idxs_oversampled = np.random.choice(idxs, n_to_add, replace=True)
+        all_train_indices.extend(idxs.tolist() + idxs_oversampled.tolist())
+    else:
+        all_train_indices.extend(idxs.tolist())
+all_train_indices = np.array(all_train_indices)
+np.random.shuffle(all_train_indices)
+oversampled_train_idx = train_idx[all_train_indices]
 seq_tensors = [torch.tensor(s, dtype=torch.float32) for s in sequences]
-train_seqs = [seq_tensors[i] for i in train_idx]
+train_seqs = [seq_tensors[i] for i in oversampled_train_idx]
 test_seqs = [seq_tensors[i] for i in test_idx]
-train_targets = torch.tensor(target_classes[train_idx], dtype=torch.long)
+train_targets = torch.tensor(target_classes[oversampled_train_idx], dtype=torch.long)
 test_targets = torch.tensor(target_classes[test_idx], dtype=torch.long)
 
 def collate_fn(batch):
@@ -59,45 +69,66 @@ test_dataset = WeekSequenceDataset(test_seqs, test_targets)
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, collate_fn=collate_fn)
 test_loader = DataLoader(test_dataset, batch_size=32, collate_fn=collate_fn)
 
-class SimpleTransformerClassifier(nn.Module):
-    def __init__(self, input_size, num_classes, seq_len, d_model=64, nhead=4, num_layers=2, dim_feedforward=256, dropout=0.1):
+# TCN Model
+class Chomp1d(nn.Module):
+    def __init__(self, chomp_size):
         super().__init__()
-        self.input_proj = nn.Linear(input_size, d_model)
-        self.ln_input = nn.LayerNorm(d_model)
-        self.positional_encoding = nn.Parameter(self._get_positional_encoding(seq_len, d_model), requires_grad=False)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, dropout=dropout, batch_first=True)
-        self.transformer_encoder = nn.ModuleList([
-            nn.Sequential(encoder_layer, nn.LayerNorm(d_model)) for _ in range(num_layers)
-        ])
-        self.attn_pool = nn.Linear(d_model, 1)
-        self.fc = nn.Linear(d_model, num_classes)
-        self.seq_len = seq_len
-    def _get_positional_encoding(self, seq_len, d_model):
-        position = torch.arange(seq_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2) * (-np.log(10000.0) / d_model))
-        pe = torch.zeros(seq_len, d_model)
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        return pe.unsqueeze(0)  # shape (1, seq_len, d_model)
+        self.chomp_size = chomp_size
+    def forward(self, x):
+        return x[:, :, :-self.chomp_size].contiguous() if self.chomp_size > 0 else x
+
+class TemporalBlock(nn.Module):
+    def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=0.2):
+        super().__init__()
+        self.conv1 = nn.Conv1d(n_inputs, n_outputs, kernel_size,
+                               stride=stride, padding=padding, dilation=dilation)
+        self.chomp1 = Chomp1d(padding)
+        self.relu1 = nn.ReLU()
+        self.dropout1 = nn.Dropout(dropout)
+        self.conv2 = nn.Conv1d(n_outputs, n_outputs, kernel_size,
+                               stride=stride, padding=padding, dilation=dilation)
+        self.chomp2 = Chomp1d(padding)
+        self.relu2 = nn.ReLU()
+        self.dropout2 = nn.Dropout(dropout)
+        self.net = nn.Sequential(self.conv1, self.chomp1, self.relu1, self.dropout1,
+                                 self.conv2, self.chomp2, self.relu2, self.dropout2)
+        self.downsample = nn.Conv1d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
+        self.relu = nn.ReLU()
+    def forward(self, x):
+        out = self.net(x)
+        res = x if self.downsample is None else self.downsample(x)
+        return self.relu(out + res)
+
+class TCN(nn.Module):
+    def __init__(self, input_size, num_classes, num_channels, kernel_size=3, dropout=0.2):
+        super().__init__()
+        layers = []
+        num_levels = len(num_channels)
+        for i in range(num_levels):
+            dilation_size = 2 ** i
+            in_channels = input_size if i == 0 else num_channels[i-1]
+            out_channels = num_channels[i]
+            layers += [TemporalBlock(in_channels, out_channels, kernel_size, stride=1, dilation=dilation_size,
+                                     padding=(kernel_size-1)*dilation_size, dropout=dropout)]
+        self.network = nn.Sequential(*layers)
+        self.fc = nn.Linear(num_channels[-1], num_classes)
     def forward(self, x, mask=None):
-        x = self.input_proj(x)
-        x = self.ln_input(x)
-        x = x + self.positional_encoding[:, :x.size(1), :].to(x.device)
-        for block in self.transformer_encoder:
-            x = block(x)
+        # x: (batch, seq_len, input_size)
+        x = x.transpose(1, 2)  # (batch, input_size, seq_len)
+        out = self.network(x)  # (batch, channels, seq_len)
+        out = out.transpose(1, 2)  # (batch, seq_len, channels)
         if mask is not None:
             mask = mask.unsqueeze(-1)
-            attn_weights = torch.softmax(self.attn_pool(x).masked_fill(~mask, float('-inf')), dim=1)
+            out = out * mask.float()
+            pooled = out.sum(dim=1) / mask.sum(dim=1).clamp(min=1)
         else:
-            attn_weights = torch.softmax(self.attn_pool(x), dim=1)
-        pooled = torch.sum(attn_weights * x, dim=1)
+            pooled = out.mean(dim=1)
         out = self.fc(pooled)
-        return out, attn_weights.detach().cpu().numpy()
+        return out
 
 input_size = train_seqs[0].shape[1]
-seq_len = max([x.shape[0] for x in train_seqs])
 num_classes = len(labels)
-model = SimpleTransformerClassifier(input_size, num_classes, seq_len)
+model = TCN(input_size, num_classes, num_channels=[32, 32, 32], kernel_size=3, dropout=0.2)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
@@ -105,12 +136,9 @@ train_targets = train_targets.to(device)
 test_targets = test_targets.to(device)
 model = model.to(device)
 
-criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001, weight_decay=1e-3)
-scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-5)
+criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0002, weight_decay=1e-3)
 num_epochs = 30
-warmup_steps = 5
-
 train_losses = []
 val_losses = []
 per_class_f1 = []
@@ -118,40 +146,35 @@ per_class_f1 = []
 for epoch in range(num_epochs):
     model.train()
     running_loss = 0.0
-    for xb, yb, mask in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}"):
+    for xb, yb, mask in train_loader:
         xb = xb.to(device)
         yb = yb.to(device)
         mask = mask.to(device)
         optimizer.zero_grad()
-        out, _ = model(xb, mask)
+        out = model(xb, mask)
         loss = criterion(out, yb)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         running_loss += loss.item() * xb.size(0)
-    if epoch < warmup_steps:
-        for g in optimizer.param_groups:
-            g['lr'] = 0.0001 + (0.001 - 0.0001) * (epoch + 1) / warmup_steps
-    else:
-        scheduler.step()
     train_loss = running_loss / len(train_loader.dataset)
     train_losses.append(train_loss)
+    # Validation
     model.eval()
     val_running_loss = 0.0
     all_val_preds = []
     all_val_trues = []
-    all_val_attn = []
-    for xb, yb, mask in tqdm(test_loader, desc=f"Val {epoch+1}/{num_epochs}"):
-        xb = xb.to(device)
-        yb = yb.to(device)
-        mask = mask.to(device)
-        out, attn_weights = model(xb, mask)
-        loss = criterion(out, yb)
-        val_running_loss += loss.item() * xb.size(0)
-        preds = torch.argmax(out, dim=1)
-        all_val_preds.append(preds.cpu().numpy())
-        all_val_trues.append(yb.cpu().numpy())
-        all_val_attn.append(attn_weights)
+    with torch.no_grad():
+        for xb, yb, mask in test_loader:
+            xb = xb.to(device)
+            yb = yb.to(device)
+            mask = mask.to(device)
+            out = model(xb, mask)
+            loss = criterion(out, yb)
+            val_running_loss += loss.item() * xb.size(0)
+            preds = torch.argmax(out, dim=1)
+            all_val_preds.append(preds.cpu().numpy())
+            all_val_trues.append(yb.cpu().numpy())
     val_loss = val_running_loss / len(test_loader.dataset)
     val_losses.append(val_loss)
     all_val_preds = np.concatenate(all_val_preds)
@@ -163,23 +186,21 @@ for epoch in range(num_epochs):
     for i in range(num_classes):
         print(f"Class {i}: Precision={precision[i]:.3f}, Recall={recall[i]:.3f}, F1={f1[i]:.3f}")
 
+# Final evaluation
 model.eval()
 all_preds = []
 all_trues = []
-all_attn = []
 with torch.no_grad():
     for xb, yb, mask in test_loader:
         xb = xb.to(device)
         yb = yb.to(device)
         mask = mask.to(device)
-        out, attn_weights = model(xb, mask)
+        out = model(xb, mask)
         preds = torch.argmax(out, dim=1)
         all_preds.append(preds.cpu().numpy())
         all_trues.append(yb.cpu().numpy())
-        all_attn.append(attn_weights)
 all_preds = np.concatenate(all_preds)
 all_trues = np.concatenate(all_trues)
-all_attn = np.concatenate(all_attn, axis=0)
 
 print('Classification Report:')
 print(classification_report(all_trues, all_preds, digits=3))
