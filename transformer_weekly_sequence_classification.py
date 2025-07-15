@@ -8,6 +8,7 @@ from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.utils.class_weight import compute_class_weight
+from collections import Counter
 
 sequences = np.load('week_sequences.npy', allow_pickle=True)
 targets = np.load('week_targets.npy', allow_pickle=True)
@@ -28,17 +29,38 @@ for i in range(len(remove)):
 
 # Bin targets into classes (example: 4 classes)
 bins = [0, 0.1, 1, 10, float('inf')]
+# bins = [0, 1, 10, 100, float('inf')]
+# bins = [0, 10, 100, 1000, float('inf')]
 labels = list(range(len(bins)-1))
 target_classes = np.digitize(targets, bins, right=False) - 1
 
-# Train/test split
+# Split indices before oversampling to avoid leakage
 indices = np.arange(len(sequences))
 train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=42)
 
+# Oversample only the training set
+train_target_classes = target_classes[train_idx]
+class_counts = Counter(train_target_classes)
+max_count = max(class_counts.values())
+indices_by_class = {c: np.where(train_target_classes == c)[0] for c in class_counts}
+all_train_indices = []
+for c, idxs in indices_by_class.items():
+    n_to_add = max_count - len(idxs)
+    if n_to_add > 0:
+        idxs_oversampled = np.random.choice(idxs, n_to_add, replace=True)
+        all_train_indices.extend(idxs.tolist() + idxs_oversampled.tolist())
+    else:
+        all_train_indices.extend(idxs.tolist())
+all_train_indices = np.array(all_train_indices)
+np.random.shuffle(all_train_indices)
+
+# Map oversampled indices back to original indices
+oversampled_train_idx = train_idx[all_train_indices]
+
 seq_tensors = [torch.tensor(s, dtype=torch.float32) for s in sequences]
-train_seqs = [seq_tensors[i] for i in train_idx]
+train_seqs = [seq_tensors[i] for i in oversampled_train_idx]
 test_seqs = [seq_tensors[i] for i in test_idx]
-train_targets = torch.tensor(target_classes[train_idx], dtype=torch.long)
+train_targets = torch.tensor(target_classes[oversampled_train_idx], dtype=torch.long)
 test_targets = torch.tensor(target_classes[test_idx], dtype=torch.long)
 
 train_seqs_padded = pad_sequence(train_seqs, batch_first=True)
@@ -63,6 +85,7 @@ class SimpleTransformerClassifier(nn.Module):
     def __init__(self, input_size, num_classes, seq_len, d_model=64, nhead=4, num_layers=2, dim_feedforward=256, dropout=0.1):
         super().__init__()
         self.input_proj = nn.Linear(input_size, d_model)
+        self.bn_input = nn.BatchNorm1d(seq_len)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
         self.positional_encoding = nn.Parameter(self._get_positional_encoding(seq_len + 1, d_model), requires_grad=False)
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, dropout=dropout, batch_first=True)
@@ -78,7 +101,10 @@ class SimpleTransformerClassifier(nn.Module):
         pe[:, 1::2] = torch.cos(position * div_term)
         return pe.unsqueeze(0)  # shape (1, seq_len, d_model)
     def forward(self, x):
+        # x: (batch, seq_len, input_size)
         x = self.input_proj(x)
+        # Apply batch normalization to input (excluding CLS token)
+        x = self.bn_input(x)
         batch_size = x.size(0)
         cls_tokens = self.cls_token.expand(batch_size, 1, -1)
         x = torch.cat((cls_tokens, x), dim=1)  # prepend CLS token
@@ -104,12 +130,13 @@ test_targets = test_targets.to(device)
 model = model.to(device)
 
 # Manual class weights (tunable)
-manual_weights = torch.tensor([0.7, 0.9, 1.25, 0.95], dtype=torch.float32).to(device)  # Example: reduce weight for classes 2 and 3
+# manual_weights = torch.tensor([0.69, 0.925, 1.26, 1.13], dtype=torch.float32).to(device) # 0.1, 1, 10, 100
+# manual_weights = torch.tensor([0.5, 1, 1.5, 1], dtype=torch.float32).to(device) # 1, 10, 100, 1000
 
-criterion = nn.CrossEntropyLoss(weight=manual_weights, label_smoothing=0.1)
-# criterion = nn.CrossEntropyLoss()
+# criterion = nn.CrossEntropyLoss(weight=manual_weights, label_smoothing=0.1)
+criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001, weight_decay=1e-3)
-num_epochs = 100
+num_epochs = 25
 train_losses = []
 val_losses = []
 
@@ -166,7 +193,7 @@ print(f'Accuracy: {acc:.3f}')
 # List the number of data for each class in the final validation test
 unique, counts = np.unique(all_trues, return_counts=True)
 total = len(all_trues)
-print('Number of samples per class in y_true_rounded:')
+print('Number of samples per class in all_trues:')
 for u, c in zip(unique, counts):
     percent = 100 * c / total
     print(f'Class {int(u)}: {c} ({percent:.2f}%)')

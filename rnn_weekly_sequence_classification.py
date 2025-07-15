@@ -8,6 +8,7 @@ from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.utils.class_weight import compute_class_weight
+from collections import Counter
 
 sequences = np.load('week_sequences.npy', allow_pickle=True)
 targets = np.load('week_targets.npy', allow_pickle=True)
@@ -27,12 +28,30 @@ for i in range(len(remove)):
     targets = np.delete(targets, idx)
 
 # Bin targets into classes (example: 4 classes)
-bins = [0, 10, 100, 1000, float('inf')]
+# bins = [0, 10, 100, 1000, float('inf')]
+bins = [0, 0.1, 1, 10, float('inf')]
 labels = list(range(len(bins)-1))
 target_classes = np.digitize(targets, bins, right=False) - 1
 
-# Train/test split
-indices = np.arange(len(sequences))
+# Oversample imbalanced classes with replacement
+class_counts = Counter(target_classes)
+max_count = max(class_counts.values())
+indices_by_class = {c: np.where(target_classes == c)[0] for c in class_counts}
+all_indices = []
+for c, idxs in indices_by_class.items():
+    n_to_add = max_count - len(idxs)
+    if n_to_add > 0:
+        idxs_oversampled = np.random.choice(idxs, n_to_add, replace=True)
+        all_indices.extend(idxs.tolist() + idxs_oversampled.tolist())
+    else:
+        all_indices.extend(idxs.tolist())
+all_indices = np.array(all_indices)
+
+# Shuffle all_indices to randomize
+np.random.shuffle(all_indices)
+
+# Use oversampled indices for train/test split
+indices = all_indices
 train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=42)
 
 seq_tensors = [torch.tensor(s, dtype=torch.float32) for s in sequences]
@@ -55,8 +74,8 @@ class WeekSequenceDataset(Dataset):
 
 train_dataset = WeekSequenceDataset(train_seqs_padded, train_targets)
 test_dataset = WeekSequenceDataset(test_seqs_padded, test_targets)
-train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=16)
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=32)
 
 # RNN Classifier
 class SimpleRNNClassifier(nn.Module):
@@ -90,9 +109,10 @@ model = model.to(device)
 class_weights = compute_class_weight('balanced', classes=np.unique(train_targets.cpu().numpy()), y=train_targets.cpu().numpy())
 class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
 
-criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
-num_epochs = 50
+# criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-3)
+num_epochs = 25
 train_losses = []
 val_losses = []
 

@@ -7,3 +7,5 @@ week.csv
 secondset.csv
 week_sequences.npy
 week_targets.npy
+week_sequences2.npy
+week_targets2.npy
