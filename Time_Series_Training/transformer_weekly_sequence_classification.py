@@ -58,8 +58,8 @@ class WeekSequenceDataset(Dataset):
 
 train_dataset = WeekSequenceDataset(train_seqs, train_targets)
 test_dataset = WeekSequenceDataset(test_seqs, test_targets)
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, collate_fn=collate_fn)
-test_loader = DataLoader(test_dataset, batch_size=32, collate_fn=collate_fn)
+train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, collate_fn=collate_fn)
+test_loader = DataLoader(test_dataset, batch_size=64, collate_fn=collate_fn)
 
 class SimpleTransformerClassifier(nn.Module):
     def __init__(self, input_size, num_classes, seq_len, d_model=64, nhead=4, num_layers=2, dim_feedforward=256, dropout=0.1):
@@ -132,10 +132,10 @@ class FocalLoss(nn.Module):
 
 # criterion = nn.CrossEntropyLoss(weight=manual_weights, label_smoothing=0.1)
 # criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-criterion = FocalLoss(alpha=1, gamma=3, reduction='mean')
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.0002, weight_decay=1e-3)
+criterion = FocalLoss(alpha=0.8, gamma=1.5, reduction='mean')
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.0005, weight_decay=1e-3)
 # scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-5)
-num_epochs = 100
+num_epochs = 50
 warmup_steps = 10
 scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, num_epochs)
 
