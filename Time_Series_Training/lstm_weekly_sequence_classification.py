@@ -5,7 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 from tqdm import tqdm
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
 from torch.nn.utils.rnn import pad_sequence
 from collections import Counter
 
@@ -31,26 +31,9 @@ bins = [0, 0.1, 1, 10, float('inf')]
 labels = list(range(len(bins)-1))
 target_classes = np.digitize(targets, bins, right=False) - 1
 
-# Oversample imbalanced classes with replacement
-class_counts = Counter(target_classes)
-max_count = max(class_counts.values())
-indices_by_class = {c: np.where(target_classes == c)[0] for c in class_counts}
-all_indices = []
-for c, idxs in indices_by_class.items():
-    n_to_add = max_count - len(idxs)
-    if n_to_add > 0:
-        idxs_oversampled = np.random.choice(idxs, n_to_add, replace=True)
-        all_indices.extend(idxs.tolist() + idxs_oversampled.tolist())
-    else:
-        all_indices.extend(idxs.tolist())
-all_indices = np.array(all_indices)
-
-# Shuffle all_indices to randomize
-np.random.shuffle(all_indices)
-
-# Use oversampled indices for train/test split
-indices = all_indices
-train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=42)
+# Stratified train/val split (no oversampling)
+sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+train_idx, test_idx = next(sss.split(np.arange(len(sequences)), target_classes))
 
 seq_tensors = [torch.tensor(s, dtype=torch.float32) for s in sequences]
 train_seqs = [seq_tensors[i] for i in train_idx]

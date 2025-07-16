@@ -5,21 +5,19 @@ from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_recall_fscore_support, f1_score
 from tqdm import tqdm
-from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
+from sklearn.model_selection import StratifiedShuffleSplit
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.utils.class_weight import compute_class_weight
 from collections import Counter
 import seaborn as sns
 from torch.optim.lr_scheduler import CosineAnnealingLR
+import torch.nn.functional as F
+from transformers import get_cosine_schedule_with_warmup
 
 sequences = np.load('week_sequences.npy', allow_pickle=True)
 targets = np.load('week_targets.npy', allow_pickle=True)
-
-# Replace NaN values in sequences and targets with 0.0
 sequences = [np.nan_to_num(s, nan=0.0) for s in sequences]
 targets = np.nan_to_num(targets, nan=0.0)
-
-# Remove sequences longer than 168 timesteps
 remove = []
 for i in range(len(sequences)):
     if len(sequences[i]) > 168:
@@ -28,45 +26,19 @@ for i in range(len(remove)):
     idx = remove[i]
     sequences.pop(idx)
     targets = np.delete(targets, idx)
-
-# Bin targets into classes (example: 4 classes)
 bins = [0, 0.1, 1, 10, float('inf')]
-# bins = [0, 1, 10, 100, float('inf')]
-# bins = [0, 10, 100, 1000, float('inf')]
 labels = list(range(len(bins)-1))
 target_classes = np.digitize(targets, bins, right=False) - 1
 
-# Stratified train/val split
+# Stratified train/val split (no oversampling)
 sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
 train_idx, test_idx = next(sss.split(np.arange(len(sequences)), target_classes))
 
-# Oversample only the training set
-train_target_classes = target_classes[train_idx]
-class_counts = Counter(train_target_classes)
-max_count = max(class_counts.values())
-indices_by_class = {c: np.where(train_target_classes == c)[0] for c in class_counts}
-all_train_indices = []
-for c, idxs in indices_by_class.items():
-    n_to_add = max_count - len(idxs)
-    if n_to_add > 0:
-        idxs_oversampled = np.random.choice(idxs, n_to_add, replace=True)
-        all_train_indices.extend(idxs.tolist() + idxs_oversampled.tolist())
-    else:
-        all_train_indices.extend(idxs.tolist())
-all_train_indices = np.array(all_train_indices)
-np.random.shuffle(all_train_indices)
-
-# Map oversampled indices back to original indices
-oversampled_train_idx = train_idx[all_train_indices]
-
 seq_tensors = [torch.tensor(s, dtype=torch.float32) for s in sequences]
-train_seqs = [seq_tensors[i] for i in oversampled_train_idx]
+train_seqs = [seq_tensors[i] for i in train_idx]
 test_seqs = [seq_tensors[i] for i in test_idx]
-train_targets = torch.tensor(target_classes[oversampled_train_idx], dtype=torch.long)
+train_targets = torch.tensor(target_classes[train_idx], dtype=torch.long)
 test_targets = torch.tensor(target_classes[test_idx], dtype=torch.long)
-
-# Custom collate_fn for attention mask
-from torch.nn.utils.rnn import pad_sequence
 
 def collate_fn(batch):
     X, y = zip(*batch)
@@ -89,7 +61,6 @@ test_dataset = WeekSequenceDataset(test_seqs, test_targets)
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, collate_fn=collate_fn)
 test_loader = DataLoader(test_dataset, batch_size=32, collate_fn=collate_fn)
 
-# Transformer Classifier
 class SimpleTransformerClassifier(nn.Module):
     def __init__(self, input_size, num_classes, seq_len, d_model=64, nhead=4, num_layers=2, dim_feedforward=256, dropout=0.1):
         super().__init__()
@@ -136,21 +107,41 @@ train_targets = train_targets.to(device)
 test_targets = test_targets.to(device)
 model = model.to(device)
 
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=1, gamma=2, reduction='mean'):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
+
+
 # Manual class weights (tunable)
 # manual_weights = torch.tensor([0.69, 0.925, 1.26, 1.13], dtype=torch.float32).to(device) # 0.1, 1, 10, 100
 # manual_weights = torch.tensor([0.5, 1, 1.5, 1], dtype=torch.float32).to(device) # 1, 10, 100, 1000
 
 # criterion = nn.CrossEntropyLoss(weight=manual_weights, label_smoothing=0.1)
-criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001, weight_decay=1e-3)
-scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-5)
-num_epochs = 30
-warmup_steps = 5
+# criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+criterion = FocalLoss(alpha=1, gamma=3, reduction='mean')
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.0002, weight_decay=1e-3)
+# scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-5)
+num_epochs = 100
+warmup_steps = 10
+scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, num_epochs)
 
 train_losses = []
 val_losses = []
 per_class_f1 = []
-all_epoch_attn = []
 
 for epoch in range(num_epochs):
     model.train()
@@ -166,7 +157,6 @@ for epoch in range(num_epochs):
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         running_loss += loss.item() * xb.size(0)
-    # Learning rate warm-up
     if epoch < warmup_steps:
         for g in optimizer.param_groups:
             g['lr'] = 0.0001 + (0.001 - 0.0001) * (epoch + 1) / warmup_steps
@@ -174,42 +164,34 @@ for epoch in range(num_epochs):
         scheduler.step()
     train_loss = running_loss / len(train_loader.dataset)
     train_losses.append(train_loss)
-    # Validation
     model.eval()
     val_running_loss = 0.0
     all_val_preds = []
     all_val_trues = []
     all_val_attn = []
-    with torch.no_grad():
-        for xb, yb, mask in test_loader:
-            xb = xb.to(device)
-            yb = yb.to(device)
-            mask = mask.to(device)
-            out, attn_weights = model(xb, mask)
-            loss = criterion(out, yb)
-            val_running_loss += loss.item() * xb.size(0)
-            preds = torch.argmax(out, dim=1)
-            all_val_preds.append(preds.cpu().numpy())
-            all_val_trues.append(yb.cpu().numpy())
-            all_val_attn.append(attn_weights)
+    for xb, yb, mask in tqdm(test_loader, desc=f"Val {epoch+1}/{num_epochs}"):
+        xb = xb.to(device)
+        yb = yb.to(device)
+        mask = mask.to(device)
+        out, attn_weights = model(xb, mask)
+        loss = criterion(out, yb)
+        val_running_loss += loss.item() * xb.size(0)
+        preds = torch.argmax(out, dim=1)
+        all_val_preds.append(preds.cpu().numpy())
+        all_val_trues.append(yb.cpu().numpy())
+        all_val_attn.append(attn_weights)
     val_loss = val_running_loss / len(test_loader.dataset)
     val_losses.append(val_loss)
     all_val_preds = np.concatenate(all_val_preds)
     all_val_trues = np.concatenate(all_val_trues)
-    # Per-class precision, recall, f1
     precision, recall, f1, _ = precision_recall_fscore_support(all_val_trues, all_val_preds, labels=np.arange(num_classes), zero_division=0)
     macro_f1 = f1_score(all_val_trues, all_val_preds, average='macro')
     per_class_f1.append(f1)
     print(f"Epoch {epoch+1}/{num_epochs}, Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}, Macro F1: {macro_f1:.4f}")
     for i in range(num_classes):
-        print(f"Class {i}: Precision={precision[i]:.3f}, Recall={recall[i]:.3f}, F1={f1[i]:.3f}")
-    # Collect attention weights for visualization
-    all_epoch_attn.append(np.concatenate(all_val_attn, axis=0))
+        if epoch == 0 or (epoch+1)%5 == 0:
+            print(f"Class {i}: Precision={precision[i]:.3f}, Recall={recall[i]:.3f}, F1={f1[i]:.3f}")
 
-# Save all attention weights into one file
-np.save('attn_weights_all_epochs.npy', np.array(all_epoch_attn))
-
-# Final evaluation
 model.eval()
 all_preds = []
 all_trues = []
@@ -238,7 +220,6 @@ print(f'Accuracy: {acc:.3f}')
 macro_f1 = f1_score(all_trues, all_preds, average='macro')
 print(f'Macro F1: {macro_f1:.3f}')
 
-# Plot confusion matrix as heatmap
 plt.figure(figsize=(6,5))
 sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
 plt.xlabel('Predicted')
@@ -247,7 +228,6 @@ plt.title('Confusion Matrix Heatmap')
 plt.tight_layout()
 plt.show()
 
-# Plot per-class F1 over epochs
 per_class_f1 = np.array(per_class_f1)
 plt.figure(figsize=(8,5))
 for i in range(num_classes):
@@ -255,6 +235,16 @@ for i in range(num_classes):
 plt.xlabel('Epoch')
 plt.ylabel('F1 Score')
 plt.title('Per-Class F1 Score Over Epochs')
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(8,5))
+plt.plot(train_losses, label='Train Loss')
+plt.plot(val_losses, label='Validation Loss')
+plt.xlabel('Epoch')
+plt.ylabel('CrossEntropy Loss')
+plt.title('LSTM Classification Training and Validation Loss')
 plt.legend()
 plt.tight_layout()
 plt.show()

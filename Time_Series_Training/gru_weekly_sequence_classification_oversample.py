@@ -1,15 +1,14 @@
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 from torch.utils.data import Dataset, DataLoader
-from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
-from collections import Counter
+from sklearn.model_selection import StratifiedShuffleSplit
 from torch.nn.utils.rnn import pad_sequence
+from collections import Counter
 import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_recall_fscore_support, f1_score
 import seaborn as sns
 
-# Data loading and preprocessing (same as other models)
 sequences = np.load('week_sequences.npy', allow_pickle=True)
 targets = np.load('week_targets.npy', allow_pickle=True)
 sequences = [np.nan_to_num(s, nan=0.0) for s in sequences]
@@ -69,54 +68,13 @@ test_dataset = WeekSequenceDataset(test_seqs, test_targets)
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, collate_fn=collate_fn)
 test_loader = DataLoader(test_dataset, batch_size=32, collate_fn=collate_fn)
 
-# TCN Model
-class Chomp1d(nn.Module):
-    def __init__(self, chomp_size):
+class SimpleGRUClassifier(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, num_classes, dropout=0.2):
         super().__init__()
-        self.chomp_size = chomp_size
-    def forward(self, x):
-        return x[:, :, :-self.chomp_size].contiguous() if self.chomp_size > 0 else x
-
-class TemporalBlock(nn.Module):
-    def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=0.2):
-        super().__init__()
-        self.conv1 = nn.Conv1d(n_inputs, n_outputs, kernel_size,
-                               stride=stride, padding=padding, dilation=dilation)
-        self.chomp1 = Chomp1d(padding)
-        self.relu1 = nn.ReLU()
-        self.dropout1 = nn.Dropout(dropout)
-        self.conv2 = nn.Conv1d(n_outputs, n_outputs, kernel_size,
-                               stride=stride, padding=padding, dilation=dilation)
-        self.chomp2 = Chomp1d(padding)
-        self.relu2 = nn.ReLU()
-        self.dropout2 = nn.Dropout(dropout)
-        self.net = nn.Sequential(self.conv1, self.chomp1, self.relu1, self.dropout1,
-                                 self.conv2, self.chomp2, self.relu2, self.dropout2)
-        self.downsample = nn.Conv1d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
-        self.relu = nn.ReLU()
-    def forward(self, x):
-        out = self.net(x)
-        res = x if self.downsample is None else self.downsample(x)
-        return self.relu(out + res)
-
-class TCN(nn.Module):
-    def __init__(self, input_size, num_classes, num_channels, kernel_size=3, dropout=0.2):
-        super().__init__()
-        layers = []
-        num_levels = len(num_channels)
-        for i in range(num_levels):
-            dilation_size = 2 ** i
-            in_channels = input_size if i == 0 else num_channels[i-1]
-            out_channels = num_channels[i]
-            layers += [TemporalBlock(in_channels, out_channels, kernel_size, stride=1, dilation=dilation_size,
-                                     padding=(kernel_size-1)*dilation_size, dropout=dropout)]
-        self.network = nn.Sequential(*layers)
-        self.fc = nn.Linear(num_channels[-1], num_classes)
+        self.gru = nn.GRU(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
+        self.fc = nn.Linear(hidden_size, num_classes)
     def forward(self, x, mask=None):
-        # x: (batch, seq_len, input_size)
-        x = x.transpose(1, 2)  # (batch, input_size, seq_len)
-        out = self.network(x)  # (batch, channels, seq_len)
-        out = out.transpose(1, 2)  # (batch, seq_len, channels)
+        out, _ = self.gru(x)
         if mask is not None:
             mask = mask.unsqueeze(-1)
             out = out * mask.float()
@@ -128,7 +86,7 @@ class TCN(nn.Module):
 
 input_size = train_seqs[0].shape[1]
 num_classes = len(labels)
-model = TCN(input_size, num_classes, num_channels=[32, 32, 32], kernel_size=3, dropout=0.2)
+model = SimpleGRUClassifier(input_size, hidden_size=64, num_layers=2, num_classes=num_classes, dropout=0.2)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
@@ -136,8 +94,8 @@ train_targets = train_targets.to(device)
 test_targets = test_targets.to(device)
 model = model.to(device)
 
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.0002, weight_decay=1e-3)
+criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-3)
 num_epochs = 30
 train_losses = []
 val_losses = []
@@ -184,7 +142,8 @@ for epoch in range(num_epochs):
     per_class_f1.append(f1)
     print(f"Epoch {epoch+1}/{num_epochs}, Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}, Macro F1: {macro_f1:.4f}")
     for i in range(num_classes):
-        print(f"Class {i}: Precision={precision[i]:.3f}, Recall={recall[i]:.3f}, F1={f1[i]:.3f}")
+        if epoch == 0 or (epoch+1)%5 == 0:
+            print(f"Class {i}: Precision={precision[i]:.3f}, Recall={recall[i]:.3f}, F1={f1[i]:.3f}")
 
 # Final evaluation
 model.eval()
@@ -227,6 +186,16 @@ for i in range(num_classes):
 plt.xlabel('Epoch')
 plt.ylabel('F1 Score')
 plt.title('Per-Class F1 Score Over Epochs')
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(8,5))
+plt.plot(train_losses, label='Train Loss')
+plt.plot(val_losses, label='Validation Loss')
+plt.xlabel('Epoch')
+plt.ylabel('CrossEntropy Loss')
+plt.title('LSTM Classification Training and Validation Loss')
 plt.legend()
 plt.tight_layout()
 plt.show()

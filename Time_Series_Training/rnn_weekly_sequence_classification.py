@@ -5,7 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 from tqdm import tqdm
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
 from torch.nn.utils.rnn import pad_sequence
 from sklearn.utils.class_weight import compute_class_weight
 from collections import Counter
@@ -28,30 +28,14 @@ for i in range(len(remove)):
     targets = np.delete(targets, idx)
 
 # Bin targets into classes (example: 4 classes)
+# bins = [0, 10, 100, 1000, float('inf')]
 bins = [0, 0.1, 1, 10, float('inf')]
 labels = list(range(len(bins)-1))
 target_classes = np.digitize(targets, bins, right=False) - 1
 
-# Oversample imbalanced classes with replacement
-class_counts = Counter(target_classes)
-max_count = max(class_counts.values())
-indices_by_class = {c: np.where(target_classes == c)[0] for c in class_counts}
-all_indices = []
-for c, idxs in indices_by_class.items():
-    n_to_add = max_count - len(idxs)
-    if n_to_add > 0:
-        idxs_oversampled = np.random.choice(idxs, n_to_add, replace=True)
-        all_indices.extend(idxs.tolist() + idxs_oversampled.tolist())
-    else:
-        all_indices.extend(idxs.tolist())
-all_indices = np.array(all_indices)
-
-# Shuffle all_indices to randomize
-np.random.shuffle(all_indices)
-
-# Use oversampled indices for train/test split
-indices = all_indices
-train_idx, test_idx = train_test_split(indices, test_size=0.2, random_state=42)
+# Stratified train/val split (no oversampling)
+sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+train_idx, test_idx = next(sss.split(np.arange(len(sequences)), target_classes))
 
 seq_tensors = [torch.tensor(s, dtype=torch.float32) for s in sequences]
 train_seqs = [seq_tensors[i] for i in train_idx]
@@ -76,27 +60,25 @@ test_dataset = WeekSequenceDataset(test_seqs_padded, test_targets)
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=32)
 
-# GRU Classifier
-class SimpleGRUClassifier(nn.Module):
-    def __init__(self, input_size, hidden_size=32, num_layers=3, num_classes=4, bidirectional=True):
+# RNN Classifier
+class SimpleRNNClassifier(nn.Module):
+    def __init__(self, input_size, hidden_size=32, num_layers=3, num_classes=4):
         super().__init__()
-        self.bidirectional = bidirectional
-        self.gru = nn.GRU(input_size, hidden_size, num_layers, batch_first=True, bidirectional=bidirectional)
-        fc1_in_features = hidden_size * 2 if bidirectional else hidden_size
+        self.rnn = nn.RNN(input_size, hidden_size, num_layers, batch_first=True, nonlinearity='relu')
         self.elu1 = nn.ELU()
-        self.fc1 = nn.Linear(fc1_in_features, 16)
+        self.fc1 = nn.Linear(hidden_size, 16)
         self.elu2 = nn.ELU()
         self.fc2 = nn.Linear(16, num_classes)
     def forward(self, x):
-        out, _ = self.gru(x)
-        out = out[:, -1, :]
+        out, _ = self.rnn(x)
+        out = out[:, -1, :]  # Use last output
         out = self.elu1(self.fc1(out))
         out = self.elu2(self.fc2(out))
         return out
 
 input_size = train_seqs_padded.shape[2]
 num_classes = len(labels)
-model = SimpleGRUClassifier(input_size, num_classes=num_classes)
+model = SimpleRNNClassifier(input_size, num_classes=num_classes)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
@@ -110,7 +92,7 @@ model = model.to(device)
 class_weights = compute_class_weight('balanced', classes=np.unique(train_targets.cpu().numpy()), y=train_targets.cpu().numpy())
 class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
 
-# criterion = nn.CrossEntropyLoss(weight = class_weights_tensor)
+# criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
 criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-3)
 num_epochs = 25
@@ -167,11 +149,19 @@ print(confusion_matrix(all_trues, all_preds))
 acc = accuracy_score(all_trues, all_preds)
 print(f'Accuracy: {acc:.3f}')
 
+# List the number of data for each class in the final validation test
+unique, counts = np.unique(all_trues, return_counts=True)
+total = len(all_trues)
+print('Number of samples per class in y_true_rounded:')
+for u, c in zip(unique, counts):
+    percent = 100 * c / total
+    print(f'Class {int(u)}: {c} ({percent:.2f}%)')
+
 plt.plot(train_losses, label='Train Loss')
 plt.plot(val_losses, label='Validation Loss')
 plt.xlabel('Epoch')
 plt.ylabel('CrossEntropy Loss')
-plt.title('GRU Classification Training and Validation Loss')
+plt.title('RNN Classification Training and Validation Loss')
 plt.legend()
 plt.tight_layout()
 plt.show()
