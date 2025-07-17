@@ -58,8 +58,8 @@ class WeekSequenceDataset(Dataset):
 
 train_dataset = WeekSequenceDataset(train_seqs, train_targets)
 test_dataset = WeekSequenceDataset(test_seqs, test_targets)
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, collate_fn=collate_fn)
-test_loader = DataLoader(test_dataset, batch_size=32, collate_fn=collate_fn)
+train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, collate_fn=collate_fn)
+test_loader = DataLoader(test_dataset, batch_size=64, collate_fn=collate_fn)
 
 class SimpleTransformerClassifier(nn.Module):
     def __init__(self, input_size, num_classes, seq_len, d_model=64, nhead=4, num_layers=2, dim_feedforward=256, dropout=0.1):
@@ -108,16 +108,27 @@ test_targets = test_targets.to(device)
 model = model.to(device)
 
 class FocalLoss(nn.Module):
-    def __init__(self, alpha=1, gamma=2, reduction='mean'):
+    def __init__(self, alpha=None, gamma=2, reduction='mean'):
         super().__init__()
-        self.alpha = alpha
+        self.alpha = alpha  # Can be a float or a tensor/list of per-class weights
         self.gamma = gamma
         self.reduction = reduction
 
     def forward(self, inputs, targets):
         ce_loss = F.cross_entropy(inputs, targets, reduction='none')
         pt = torch.exp(-ce_loss)
-        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        if self.alpha is not None:
+            if isinstance(self.alpha, (list, torch.Tensor)):
+                if not isinstance(self.alpha, torch.Tensor):
+                    alpha = torch.tensor(self.alpha, dtype=inputs.dtype, device=inputs.device)
+                else:
+                    alpha = self.alpha.to(inputs.device)
+                at = alpha[targets]
+            else:
+                at = self.alpha
+            focal_loss = at * (1 - pt) ** self.gamma * ce_loss
+        else:
+            focal_loss = (1 - pt) ** self.gamma * ce_loss
         if self.reduction == 'mean':
             return focal_loss.mean()
         elif self.reduction == 'sum':
@@ -132,16 +143,17 @@ class FocalLoss(nn.Module):
 
 # criterion = nn.CrossEntropyLoss(weight=manual_weights, label_smoothing=0.1)
 # criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-criterion = FocalLoss(alpha=1, gamma=3, reduction='mean')
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.0002, weight_decay=1e-3)
+criterion = FocalLoss(alpha=[1, 1, 2.5, 1], gamma=3, reduction='mean')
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.0005, weight_decay=1e-3)
 # scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-5)
-num_epochs = 100
+num_epochs = 50
 warmup_steps = 10
 scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, num_epochs)
 
 train_losses = []
 val_losses = []
 per_class_f1 = []
+macro_f1_score = []
 
 for epoch in range(num_epochs):
     model.train()
@@ -186,6 +198,7 @@ for epoch in range(num_epochs):
     all_val_trues = np.concatenate(all_val_trues)
     precision, recall, f1, _ = precision_recall_fscore_support(all_val_trues, all_val_preds, labels=np.arange(num_classes), zero_division=0)
     macro_f1 = f1_score(all_val_trues, all_val_preds, average='macro')
+    macro_f1_score.append(macro_f1)
     per_class_f1.append(f1)
     print(f"Epoch {epoch+1}/{num_epochs}, Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}, Macro F1: {macro_f1:.4f}")
     for i in range(num_classes):
@@ -242,6 +255,7 @@ plt.show()
 plt.figure(figsize=(8,5))
 plt.plot(train_losses, label='Train Loss')
 plt.plot(val_losses, label='Validation Loss')
+plt.plot(macro_f1_score, label='Macro F1 Score')
 plt.xlabel('Epoch')
 plt.ylabel('CrossEntropy Loss')
 plt.title('LSTM Classification Training and Validation Loss')
