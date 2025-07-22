@@ -1,5 +1,5 @@
 import numpy as np
-data = np.load('week_sequences.npy', allow_pickle=True)
+data = np.load('week_sequences_r1.npy', allow_pickle=True)
 for seq in data:
     if np.isnan(seq).any():
         for i, val in enumerate(seq):

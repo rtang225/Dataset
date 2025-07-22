@@ -14,11 +14,14 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch.nn.functional as F
 from transformers import get_cosine_schedule_with_warmup
 
+# Load sequences and targets
 sequences = np.load('week_sequences.npy', allow_pickle=True)
 targets = np.load('week_targets.npy', allow_pickle=True)
 sequences = [np.nan_to_num(s, nan=0.0) for s in sequences]
 targets = np.nan_to_num(targets, nan=0.0)
 remove = []
+
+# Remove sequences longer than 168 timesteps
 for i in range(len(sequences)):
     if len(sequences[i]) > 168:
         remove.insert(0, i)
@@ -26,7 +29,10 @@ for i in range(len(remove)):
     idx = remove[i]
     sequences.pop(idx)
     targets = np.delete(targets, idx)
+
 bins = [0, 0.1, 1, 10, float('inf')]
+# bins = [0, 1, 10, 100, float('inf')]
+# bins = [0, 10, 250, float('inf')]
 labels = list(range(len(bins)-1))
 target_classes = np.digitize(targets, bins, right=False) - 1
 
@@ -62,7 +68,7 @@ train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, collate_fn
 test_loader = DataLoader(test_dataset, batch_size=64, collate_fn=collate_fn)
 
 class SimpleTransformerClassifier(nn.Module):
-    def __init__(self, input_size, num_classes, seq_len, d_model=64, nhead=4, num_layers=2, dim_feedforward=256, dropout=0.1):
+    def __init__(self, input_size, num_classes, seq_len, d_model=128, nhead=4, num_layers=2, dim_feedforward=512, dropout=0.1):
         super().__init__()
         self.input_proj = nn.Linear(input_size, d_model)
         self.ln_input = nn.LayerNorm(d_model)
@@ -143,32 +149,62 @@ class FocalLoss(nn.Module):
 
 # criterion = nn.CrossEntropyLoss(weight=manual_weights, label_smoothing=0.1)
 # criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-criterion = FocalLoss(alpha=[1, 1, 2.5, 1], gamma=3, reduction='mean')
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.0005, weight_decay=1e-3)
+criterion = FocalLoss(alpha=[0.8, 1, 1.2, 1], gamma=3, reduction='mean')
+# criterion = FocalLoss(alpha=None, gamma=3, reduction='mean')
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-3)
 # scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-5)
-num_epochs = 50
-warmup_steps = 10
+num_epochs = 150
+warmup_steps = 750
 scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, num_epochs)
 
 train_losses = []
 val_losses = []
 per_class_f1 = []
 macro_f1_score = []
+aux_train_class_loss = []
 
 for epoch in range(num_epochs):
     model.train()
     running_loss = 0.0
+    class_loss_sum = np.zeros(num_classes)
+    class_loss_count = np.zeros(num_classes)
+    aux_loss_sum = 0.0
     for xb, yb, mask in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}"):
         xb = xb.to(device)
         yb = yb.to(device)
         mask = mask.to(device)
         optimizer.zero_grad()
         out, _ = model(xb, mask)
-        loss = criterion(out, yb)
+        ce_loss = F.cross_entropy(out, yb, reduction='none')
+        pt = torch.exp(-ce_loss)
+        if criterion.alpha is not None:
+            if isinstance(criterion.alpha, (list, torch.Tensor)):
+                alpha = torch.tensor(criterion.alpha, dtype=out.dtype, device=out.device) if not isinstance(criterion.alpha, torch.Tensor) else criterion.alpha.to(out.device)
+                at = alpha[yb]
+            else:
+                at = criterion.alpha
+            focal_loss = at * (1 - pt) ** criterion.gamma * ce_loss
+        else:
+            focal_loss = (1 - pt) ** criterion.gamma * ce_loss
+        # Auxiliary task: predict sequence mean as regression
+        seq_mean = xb.mean(dim=1).mean(dim=1)  # shape [batch_size]
+        aux_pred = out.mean(dim=1)  # shape [batch_size]
+        aux_loss = F.mse_loss(aux_pred, seq_mean)
+        aux_loss_sum += aux_loss.item() * xb.size(0)
+        for c in range(num_classes):
+            mask_c = (yb == c)
+            if mask_c.any():
+                class_loss_sum[c] += focal_loss[mask_c].sum().item()
+                class_loss_count[c] += mask_c.sum().item()
+        loss = focal_loss.mean() + 0.1 * aux_loss  # Weighted sum
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         running_loss += loss.item() * xb.size(0)
+    avg_class_loss = class_loss_sum / np.maximum(class_loss_count, 1)
+    aux_train_class_loss.append(avg_class_loss)
+    print(f"Per-class train loss: " + ", ".join([f"Class {i}: {avg_class_loss[i]:.4f}" for i in range(num_classes)]))
+    print(f"Auxiliary regression loss: {aux_loss_sum / len(train_loader.dataset):.4f}")
     if epoch < warmup_steps:
         for g in optimizer.param_groups:
             g['lr'] = 0.0001 + (0.001 - 0.0001) * (epoch + 1) / warmup_steps
@@ -252,13 +288,26 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-plt.figure(figsize=(8,5))
-plt.plot(train_losses, label='Train Loss')
-plt.plot(val_losses, label='Validation Loss')
-plt.plot(macro_f1_score, label='Macro F1 Score')
+"""plt.figure(figsize=(8,5))
+plt.plot(train_losses, label='Train Loss', marker='o')
+plt.plot(val_losses, label='Validation Loss', marker='o')
+plt.plot(macro_f1_score, label='Macro F1 Score', marker='o')
 plt.xlabel('Epoch')
-plt.ylabel('CrossEntropy Loss')
-plt.title('LSTM Classification Training and Validation Loss')
+plt.ylabel('CrossEntropy Loss / Macro F1')
+plt.title('Transformer Classification Training, Validation Loss, and Macro F1')
 plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()"""
+
+aux_train_class_loss = np.array(aux_train_class_loss)
+plt.figure(figsize=(8,5))
+for i in range(num_classes):
+    plt.plot(aux_train_class_loss[:, i], label=f'Class {i} Train Loss', marker='o')
+plt.xlabel('Epoch')
+plt.ylabel('Per-Class Train Loss')
+plt.title('Per-Class Train Loss Over Epochs')
+plt.legend()
+plt.grid(True)
 plt.tight_layout()
 plt.show()
