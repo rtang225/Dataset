@@ -15,8 +15,8 @@ import torch.nn.functional as F
 from transformers import get_cosine_schedule_with_warmup
 
 # Load sequences and targets
-sequences = np.load('week_sequences.npy', allow_pickle=True)
-targets = np.load('week_targets.npy', allow_pickle=True)
+sequences = np.load('week_sequences_r3.npy', allow_pickle=True)
+targets = np.load('week_targets_r3.npy', allow_pickle=True)
 sequences = [np.nan_to_num(s, nan=0.0) for s in sequences]
 targets = np.nan_to_num(targets, nan=0.0)
 remove = []
@@ -68,7 +68,7 @@ train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, collate_fn
 test_loader = DataLoader(test_dataset, batch_size=64, collate_fn=collate_fn)
 
 class SimpleTransformerClassifier(nn.Module):
-    def __init__(self, input_size, num_classes, seq_len, d_model=128, nhead=4, num_layers=2, dim_feedforward=512, dropout=0.1):
+    def __init__(self, input_size, num_classes, seq_len, d_model=128, nhead=4, num_layers=3, dim_feedforward=512, dropout=0.1):
         super().__init__()
         self.input_proj = nn.Linear(input_size, d_model)
         self.ln_input = nn.LayerNorm(d_model)
@@ -149,11 +149,12 @@ class FocalLoss(nn.Module):
 
 # criterion = nn.CrossEntropyLoss(weight=manual_weights, label_smoothing=0.1)
 # criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-criterion = FocalLoss(alpha=[0.8, 1, 1.2, 1], gamma=3, reduction='mean')
+criterion = FocalLoss(alpha=[0.75, 1.05, 1.2, 1], gamma=3, reduction='mean')
+# criterion = FocalLoss(alpha=[0.6, 1.1, 1.25, 1.05], gamma=3, reduction='mean') # r3
 # criterion = FocalLoss(alpha=None, gamma=3, reduction='mean')
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-3)
 # scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-5)
-num_epochs = 150
+num_epochs = 100
 warmup_steps = 750
 scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, num_epochs)
 
@@ -238,7 +239,7 @@ for epoch in range(num_epochs):
     per_class_f1.append(f1)
     print(f"Epoch {epoch+1}/{num_epochs}, Training Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}, Macro F1: {macro_f1:.4f}")
     for i in range(num_classes):
-        if epoch == 0 or (epoch+1)%5 == 0:
+        if epoch == 0 or (epoch+1)%10 == 0:
             print(f"Class {i}: Precision={precision[i]:.3f}, Recall={recall[i]:.3f}, F1={f1[i]:.3f}")
 
 model.eval()

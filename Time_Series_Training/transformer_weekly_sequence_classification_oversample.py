@@ -31,8 +31,9 @@ for i in range(len(remove)):
 
 # Bin targets into classes (example: 4 classes)
 # bins = [0, 0.1, 1, 10, float('inf')]
-# bins = [0, 1, 10, 100, float('inf')]
-bins = [0, 10, float('inf')]
+bins = [0, 1, 10, 100, float('inf')]
+bins = [0, 10, 100, 1000, float('inf')]
+# bins = [0, 10, float('inf')]
 labels = list(range(len(bins)-1))
 target_classes = np.digitize(targets, bins, right=False) - 1
 

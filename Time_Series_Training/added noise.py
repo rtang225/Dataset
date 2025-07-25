@@ -14,11 +14,14 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch.nn.functional as F
 from transformers import get_cosine_schedule_with_warmup
 
-sequences = np.load('week_sequences2.npy', allow_pickle=True)
-targets = np.load('week_targets2.npy', allow_pickle=True)
+# Load sequences and targets
+sequences = np.load('week_sequences.npy', allow_pickle=True)
+targets = np.load('week_targets.npy', allow_pickle=True)
 sequences = [np.nan_to_num(s, nan=0.0) for s in sequences]
 targets = np.nan_to_num(targets, nan=0.0)
 remove = []
+
+# Remove sequences longer than 168 timesteps
 for i in range(len(sequences)):
     if len(sequences[i]) > 168:
         remove.insert(0, i)
@@ -26,9 +29,10 @@ for i in range(len(remove)):
     idx = remove[i]
     sequences.pop(idx)
     targets = np.delete(targets, idx)
+
 # bins = [0, 0.1, 1, 10, float('inf')]
-bins = [0, 1, 10, 100, float('inf')]
-# bins = [0, 10, 250, float('inf')]
+# bins = [0, 1, 10, 100, float('inf')]
+bins = [0, 10, float('inf')]
 labels = list(range(len(bins)-1))
 target_classes = np.digitize(targets, bins, right=False) - 1
 
@@ -82,7 +86,7 @@ train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, collate_fn
 test_loader = DataLoader(test_dataset, batch_size=64, collate_fn=collate_fn)
 
 class SimpleTransformerClassifier(nn.Module):
-    def __init__(self, input_size, num_classes, seq_len, d_model=128, nhead=4, num_layers=3, dim_feedforward=512, dropout=0.1):
+    def __init__(self, input_size, num_classes, seq_len, d_model=128, nhead=4, num_layers=2, dim_feedforward=512, dropout=0.1):
         super().__init__()
         self.input_proj = nn.Linear(input_size, d_model)
         self.ln_input = nn.LayerNorm(d_model)
@@ -157,15 +161,54 @@ class FocalLoss(nn.Module):
             return focal_loss
 
 
+# Data augmentation: add noise and random transformations to training sequences
+np.random.seed(42)
+def augment_sequence(seq):
+    # Add Gaussian noise
+    noise = np.random.normal(0, 0.01, seq.shape)
+    seq_noisy = seq + noise
+    # Random scaling
+    scale = np.random.uniform(0.95, 1.05)
+    seq_scaled = seq_noisy * scale
+    # Random time shift (roll)
+    shift = np.random.randint(-5, 6)
+    seq_shifted = np.roll(seq_scaled, shift, axis=0)
+    # Random dropout (set some timesteps to zero)
+    dropout_mask = np.random.binomial(1, 0.98, seq_shifted.shape)
+    seq_dropout = seq_shifted * dropout_mask
+    # Random walk/drift
+    drift = np.cumsum(np.random.normal(0, 0.001, seq_dropout.shape[0]))
+    seq_drifted = seq_dropout + drift[:, None]
+    # Magnitude warping
+    warp = np.random.uniform(0.9, 1.1, seq_drifted.shape[0])
+    seq_warped = seq_drifted * warp[:, None]
+    # Feature/channel dropout
+    if seq_warped.shape[1] > 1:
+        channel_dropout = np.random.binomial(1, 0.95, seq_warped.shape[1])
+        seq_channel_dropout = seq_warped * channel_dropout[None, :]
+    else:
+        seq_channel_dropout = seq_warped
+    # Impulse noise/sensor spike
+    n_spikes = np.random.randint(1, 4)
+    for _ in range(n_spikes):
+        spike_t = np.random.randint(0, seq_channel_dropout.shape[0])
+        spike_f = np.random.randint(0, seq_channel_dropout.shape[1])
+        seq_channel_dropout[spike_t, spike_f] += np.random.uniform(0.5, 1.5)
+    return seq_channel_dropout
+
+# Apply augmentation only to training sequences
+train_seqs = [torch.tensor(augment_sequence(s.numpy()), dtype=torch.float32) for s in train_seqs]
+
 # Manual class weights (tunable)
 # manual_weights = torch.tensor([0.69, 0.925, 1.26, 1.13], dtype=torch.float32).to(device) # 0.1, 1, 10, 100
 # manual_weights = torch.tensor([0.5, 1, 1.5, 1], dtype=torch.float32).to(device) # 1, 10, 100, 1000
 
 # criterion = nn.CrossEntropyLoss(weight=manual_weights, label_smoothing=0.1)
 # criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-# criterion = FocalLoss(alpha=[0.9, 1, 3, 3], gamma=3, reduction='mean')
-criterion = FocalLoss(alpha=None, gamma=3, reduction='mean')
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-3)
+# criterion = FocalLoss(alpha=[1, 0.75, 3, 2], gamma=3, reduction='mean') # 1, 10, 100, 1000
+criterion = FocalLoss(alpha=[1, 8], gamma=3, reduction='mean')
+# criterion = FocalLoss(alpha=None, gamma=3, reduction='mean')
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.1, weight_decay=1e-3)
 # scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-5)
 num_epochs = 100
 warmup_steps = 750

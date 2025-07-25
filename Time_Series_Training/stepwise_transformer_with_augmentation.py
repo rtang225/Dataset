@@ -2,17 +2,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_recall_fscore_support, f1_score
 from tqdm import tqdm
 from sklearn.model_selection import StratifiedShuffleSplit
 from torch.nn.utils.rnn import pad_sequence
-from sklearn.utils.class_weight import compute_class_weight
 from collections import Counter
-import seaborn as sns
-from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch.nn.functional as F
 from transformers import get_cosine_schedule_with_warmup
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 # Load sequences and targets
 sequences = np.load('week_sequences.npy', allow_pickle=True)
@@ -27,19 +25,42 @@ for i in range(len(remove)):
     idx = remove[i]
     sequences.pop(idx)
     targets = np.delete(targets, idx)
-bins = [0, 1, 10, 100, float('inf')]
+
+# Stepwise bins
+bins = [0, 10, float('inf')]
 labels = list(range(len(bins)-1))
 target_classes = np.digitize(targets, bins, right=False) - 1
 
-results = {}
-num_classes = len(labels)
+# Data augmentation function
+np.random.seed(42)
+def augment_sequence(seq):
+    noise = np.random.normal(0, 0.01, seq.shape)
+    seq_noisy = seq + noise
+    scale = np.random.uniform(0.95, 1.05)
+    seq_scaled = seq_noisy * scale
+    shift = np.random.randint(-5, 6)
+    seq_shifted = np.roll(seq_scaled, shift, axis=0)
+    dropout_mask = np.random.binomial(1, 0.98, seq_shifted.shape)
+    seq_dropout = seq_shifted * dropout_mask
+    drift = np.cumsum(np.random.normal(0, 0.001, seq_dropout.shape[0]))
+    seq_drifted = seq_dropout + drift[:, None]
+    warp = np.random.uniform(0.9, 1.1, seq_drifted.shape[0])
+    seq_warped = seq_drifted * warp[:, None]
+    if seq_warped.shape[1] > 1:
+        channel_dropout = np.random.binomial(1, 0.95, seq_warped.shape[1])
+        seq_channel_dropout = seq_warped * channel_dropout[None, :]
+    else:
+        seq_channel_dropout = seq_warped
+    n_spikes = np.random.randint(1, 4)
+    for _ in range(n_spikes):
+        spike_t = np.random.randint(0, seq_channel_dropout.shape[0])
+        spike_f = np.random.randint(0, seq_channel_dropout.shape[1])
+        seq_channel_dropout[spike_t, spike_f] += np.random.uniform(0.5, 1.5)
+    return seq_channel_dropout
 
-# First binary classification: 0-10 vs 10-inf
-binary_bins = [0, 1, float('inf')]
-binary_labels = list(range(len(binary_bins)-1))
+# Step 1: Binary classification (0-10 vs 10-inf)
+binary_bins = [0, 10, float('inf')]
 binary_classes = np.digitize(targets, binary_bins, right=False) - 1
-
-print('Step 1: Binary classification (0-10 vs 10-inf)')
 keep_indices = np.where(np.isin(binary_classes, [0, 1]))[0]
 binary_sequences = [sequences[i] for i in keep_indices]
 binary_targets = targets[keep_indices]
@@ -51,12 +72,35 @@ train_seqs = [seq_tensors[i] for i in train_idx]
 test_seqs = [seq_tensors[i] for i in test_idx]
 train_targets = torch.tensor(binary_class_labels[train_idx], dtype=torch.long)
 test_targets = torch.tensor(binary_class_labels[test_idx], dtype=torch.long)
+
+# Oversample training set
+train_target_classes = train_targets.cpu().numpy() if torch.is_tensor(train_targets) else np.array(train_targets)
+class_counts = Counter(train_target_classes)
+max_count = max(class_counts.values())
+indices_by_class = {c: np.where(train_target_classes == c)[0] for c in class_counts}
+all_train_indices = []
+for c, idxs in indices_by_class.items():
+    n_to_add = max_count - len(idxs)
+    if n_to_add > 0:
+        idxs_oversampled = np.random.choice(idxs, n_to_add, replace=True)
+        all_train_indices.extend(idxs.tolist() + idxs_oversampled.tolist())
+    else:
+        all_train_indices.extend(idxs.tolist())
+all_train_indices = np.array(all_train_indices)
+np.random.shuffle(all_train_indices)
+train_seqs = [train_seqs[i] for i in all_train_indices]
+train_targets = train_targets[all_train_indices] if torch.is_tensor(train_targets) else np.array(train_targets)[all_train_indices]
+
+# Augment training sequences
+train_seqs = [torch.tensor(augment_sequence(s.numpy()), dtype=torch.float32) for s in train_seqs]
+
 def collate_fn(batch):
     X, y = zip(*batch)
     X_padded = pad_sequence(X, batch_first=True)
     lengths = torch.tensor([x.shape[0] for x in X])
     mask = torch.arange(X_padded.shape[1])[None, :] < lengths[:, None]
     return X_padded, torch.tensor(y), mask
+
 class WeekSequenceDataset(Dataset):
     def __init__(self, X, y):
         self.X = X
@@ -65,10 +109,12 @@ class WeekSequenceDataset(Dataset):
         return len(self.X)
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
+
 train_dataset = WeekSequenceDataset(train_seqs, train_targets)
 test_dataset = WeekSequenceDataset(test_seqs, test_targets)
 train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, collate_fn=collate_fn)
 test_loader = DataLoader(test_dataset, batch_size=64, collate_fn=collate_fn)
+
 class SimpleTransformerClassifier(nn.Module):
     def __init__(self, input_size, num_classes, seq_len, d_model=128, nhead=4, num_layers=2, dim_feedforward=512, dropout=0.1):
         super().__init__()
@@ -80,7 +126,7 @@ class SimpleTransformerClassifier(nn.Module):
             nn.Sequential(encoder_layer, nn.LayerNorm(d_model)) for _ in range(num_layers)
         ])
         self.attn_pool = nn.Linear(d_model, 1)
-        self.fc = nn.Linear(d_model, num_classes)
+        self.fc = nn.Linear(d_model, 2)
         self.seq_len = seq_len
     def _get_positional_encoding(self, seq_len, d_model):
         position = torch.arange(seq_len).unsqueeze(1)
@@ -103,6 +149,7 @@ class SimpleTransformerClassifier(nn.Module):
         pooled = torch.sum(attn_weights * x, dim=1)
         out = self.fc(pooled)
         return out, attn_weights.detach().cpu().numpy()
+
 input_size = train_seqs[0].shape[1]
 seq_len = max([x.shape[0] for x in train_seqs])
 model = SimpleTransformerClassifier(input_size, 2, seq_len)
@@ -112,7 +159,7 @@ test_targets = test_targets.to(device)
 model = model.to(device)
 criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-3)
-num_epochs = 100
+num_epochs = 50
 warmup_steps = 750
 scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, num_epochs)
 train_losses = []
@@ -170,27 +217,18 @@ print(f'Accuracy: {acc:.3f}')
 macro_f1 = f1_score(all_val_trues, all_val_preds, average='macro')
 print(f'Macro F1: {macro_f1:.3f}\n')
 
-# Save binary validation predictions and test indices for step 2
-binary_val_preds_saved = all_val_preds.copy()
-binary_val_trues_saved = all_val_trues.copy()
-binary_test_indices_saved = np.array(test_idx)
-
 # Step 2: Multiclass for 10-inf
-# Only use samples predicted as 10-inf in the binary step
+binary_val_preds_saved = all_val_preds.copy()
+binary_test_indices_saved = np.array(test_idx)
 selected_indices = binary_test_indices_saved[binary_val_preds_saved == 1]
 selected_sequences = [sequences[i] for i in selected_indices]
 selected_targets = targets[selected_indices]
-# Now bin these samples for multi-class
-multi_bins = [1, 10, 100, 1000, float('inf')]
-multi_labels = list(range(len(multi_bins)-1))
+multi_bins = [10, 100, 1000, float('inf')]
 multi_classes = np.digitize(selected_targets, multi_bins, right=False) - 1
 keep_indices = np.where(np.isin(multi_classes, [0, 1, 2]))[0]
 multi_sequences = [selected_sequences[i] for i in keep_indices]
 multi_targets = selected_targets[keep_indices]
 multi_class_labels = multi_classes[keep_indices]
-num_epochs = 150
-warmup_steps = 500
-# If not enough samples, print warning
 if len(multi_sequences) == 0:
     print('No samples predicted as 10-inf in binary step. Skipping multi-class step.')
 else:
@@ -201,8 +239,28 @@ else:
     test_seqs = [seq_tensors[i] for i in test_idx]
     train_targets = torch.tensor(multi_class_labels[train_idx], dtype=torch.long)
     test_targets = torch.tensor(multi_class_labels[test_idx], dtype=torch.long)
-    input_size = train_seqs[0].shape[1]
-    seq_len = max([x.shape[0] for x in train_seqs])
+    # Oversample and augment
+    train_target_classes = train_targets.cpu().numpy() if torch.is_tensor(train_targets) else np.array(train_targets)
+    class_counts = Counter(train_target_classes)
+    max_count = max(class_counts.values())
+    indices_by_class = {c: np.where(train_target_classes == c)[0] for c in class_counts}
+    all_train_indices = []
+    for c, idxs in indices_by_class.items():
+        n_to_add = max_count - len(idxs)
+        if n_to_add > 0:
+            idxs_oversampled = np.random.choice(idxs, n_to_add, replace=True)
+            all_train_indices.extend(idxs.tolist() + idxs_oversampled.tolist())
+        else:
+            all_train_indices.extend(idxs.tolist())
+    all_train_indices = np.array(all_train_indices)
+    np.random.shuffle(all_train_indices)
+    train_seqs = [train_seqs[i] for i in all_train_indices]
+    train_targets = train_targets[all_train_indices] if torch.is_tensor(train_targets) else np.array(train_targets)[all_train_indices]
+    train_seqs = [torch.tensor(augment_sequence(s.numpy()), dtype=torch.float32) for s in train_seqs]
+    train_dataset = WeekSequenceDataset(train_seqs, train_targets)
+    test_dataset = WeekSequenceDataset(test_seqs, test_targets)
+    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, collate_fn=collate_fn)
+    test_loader = DataLoader(test_dataset, batch_size=64, collate_fn=collate_fn)
     model = SimpleTransformerClassifier(input_size, 3, seq_len)
     train_targets = train_targets.to(device)
     test_targets = test_targets.to(device)
@@ -212,10 +270,6 @@ else:
     train_losses = []
     val_losses = []
     macro_f1_score = []
-    train_dataset = WeekSequenceDataset(train_seqs, train_targets)
-    test_dataset = WeekSequenceDataset(test_seqs, test_targets)
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, collate_fn=collate_fn)
-    test_loader = DataLoader(test_dataset, batch_size=64, collate_fn=collate_fn)
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
