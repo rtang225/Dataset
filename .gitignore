@@ -5,6 +5,8 @@ regression_to_classification/
 Feature Graphs/
 week.csv
 secondset.csv
+human.csv
+lightning.csv
 week_sequences.npy
 week_targets.npy
 week_sequences_r1.npy
@@ -15,3 +17,7 @@ week_sequences_r3.npy
 week_targets_r3.npy
 week_sequences2.npy
 week_targets2.npy
+week_sequences_human.npy
+week_targets_human.npy
+week_sequences_lightning.npy
+week_targets_lightning.npy

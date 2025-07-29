@@ -7,7 +7,7 @@ import time
 import datetime
 
 # Read the CSV file and select only the required columns
-df = pd.read_csv('fp-historical-wildfire-data-cleaned.csv', usecols=['FIRE_START_DATE', 'LATITUDE', 'LONGITUDE', 'CURRENT_SIZE'])
+df = pd.read_csv('originaldata.csv', usecols=['DATE_DEBUT', 'LATITUDE', 'LONGITUDE', 'SUP_HA', 'CAUSE'])
 
 # Setup the Open-Meteo API client with cache and retry on error
 cache_session = requests_cache.CachedSession('.cache', expire_after = -1)
@@ -19,13 +19,14 @@ hour_start = time.time()
 
 # For each row in the CSV, fetch weather data for the date and location
 for index, row in df.iterrows():    
-    date = row['FIRE_START_DATE']
+    date = row['DATE_DEBUT']
     lat = row['LATITUDE']
     lon = row['LONGITUDE']
-    area = row['CURRENT_SIZE']
+    area = row['SUP_HA']
+    cause = row['CAUSE']
     url = "https://customer-archive-api.open-meteo.com/v1/archive"
     try:
-        date = datetime.datetime.strptime(date, '%m/%d/%Y %H:%M').date()
+        date = datetime.datetime.strptime(date, '%Y-%m-%d').date()
     except Exception as e:
         continue
     params = {
@@ -114,5 +115,9 @@ for index, row in df.iterrows():
     print(hourly_dataframe)
 
     # Write or append to CSV
-    file_exists = os.path.isfile('secondset.csv')
-    hourly_dataframe.to_csv('secondset.csv', mode='a', header=not file_exists, index=False)
+    if cause == "Humaine":
+        file_exists = os.path.isfile('human.csv')
+        hourly_dataframe.to_csv('human.csv', mode='a', header=not file_exists, index=False)
+    if cause == "Foudre":
+        file_exists = os.path.isfile('lightning.csv')
+        hourly_dataframe.to_csv('lightning.csv', mode='a', header=not file_exists, index=False)

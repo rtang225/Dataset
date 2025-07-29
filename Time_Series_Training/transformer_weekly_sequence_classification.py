@@ -149,9 +149,9 @@ class FocalLoss(nn.Module):
 
 # criterion = nn.CrossEntropyLoss(weight=manual_weights, label_smoothing=0.1)
 # criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-criterion = FocalLoss(alpha=[0.75, 1.05, 1.2, 1], gamma=3, reduction='mean')
+# criterion = FocalLoss(alpha=[0.75, 1.05, 1.2, 1], gamma=3, reduction='mean')
 # criterion = FocalLoss(alpha=[0.6, 1.1, 1.25, 1.05], gamma=3, reduction='mean') # r3
-# criterion = FocalLoss(alpha=None, gamma=3, reduction='mean')
+criterion = FocalLoss(alpha=None, gamma=3, reduction='mean')
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-3)
 # scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-5)
 num_epochs = 100
