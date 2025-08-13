@@ -15,8 +15,8 @@ import torch.nn.functional as F
 from transformers import get_cosine_schedule_with_warmup
 
 # Load sequences and targets
-sequences = np.load('week_sequences_r3.npy', allow_pickle=True)
-targets = np.load('week_targets_r3.npy', allow_pickle=True)
+sequences = np.load('week_sequences_human.npy', allow_pickle=True)
+targets = np.load('week_targets_human.npy', allow_pickle=True)
 sequences = [np.nan_to_num(s, nan=0.0) for s in sequences]
 targets = np.nan_to_num(targets, nan=0.0)
 remove = []
@@ -149,12 +149,13 @@ class FocalLoss(nn.Module):
 
 # criterion = nn.CrossEntropyLoss(weight=manual_weights, label_smoothing=0.1)
 # criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-# criterion = FocalLoss(alpha=[0.75, 1.05, 1.2, 1], gamma=3, reduction='mean')
+criterion = FocalLoss(alpha=[0.8, 1.05, 1.1, 1.05], gamma=3, reduction='mean')
+# criterion = FocalLoss(alpha=[0.76, 1.04, 1.2, 1], gamma=3, reduction='mean')
 # criterion = FocalLoss(alpha=[0.6, 1.1, 1.25, 1.05], gamma=3, reduction='mean') # r3
-criterion = FocalLoss(alpha=None, gamma=3, reduction='mean')
+# riterion = FocalLoss(alpha=None, gamma=3, reduction='mean')
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-3)
 # scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-5)
-num_epochs = 100
+num_epochs = 200
 warmup_steps = 750
 scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, num_epochs)
 

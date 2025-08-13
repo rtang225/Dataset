@@ -15,8 +15,8 @@ import torch.nn.functional as F
 from transformers import get_cosine_schedule_with_warmup
 
 # Load sequences and targets
-sequences = np.load('week_sequences.npy', allow_pickle=True)
-targets = np.load('week_targets.npy', allow_pickle=True)
+sequences = np.load('week_sequences_lightning.npy', allow_pickle=True)
+targets = np.load('week_targets_lightning.npy', allow_pickle=True)
 sequences = [np.nan_to_num(s, nan=0.0) for s in sequences]
 targets = np.nan_to_num(targets, nan=0.0)
 remove = []
@@ -27,7 +27,7 @@ for i in range(len(remove)):
     idx = remove[i]
     sequences.pop(idx)
     targets = np.delete(targets, idx)
-bins = [0, 1, 10, 100, float('inf')]
+bins = [0, 10, 100, 1000, float('inf')]
 labels = list(range(len(bins)-1))
 target_classes = np.digitize(targets, bins, right=False) - 1
 
@@ -35,7 +35,7 @@ results = {}
 num_classes = len(labels)
 
 # First binary classification: 0-10 vs 10-inf
-binary_bins = [0, 1, float('inf')]
+binary_bins = [0, 10, float('inf')]
 binary_labels = list(range(len(binary_bins)-1))
 binary_classes = np.digitize(targets, binary_bins, right=False) - 1
 
@@ -112,7 +112,7 @@ test_targets = test_targets.to(device)
 model = model.to(device)
 criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-3)
-num_epochs = 100
+num_epochs = 200
 warmup_steps = 750
 scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, num_epochs)
 train_losses = []
@@ -181,7 +181,7 @@ selected_indices = binary_test_indices_saved[binary_val_preds_saved == 1]
 selected_sequences = [sequences[i] for i in selected_indices]
 selected_targets = targets[selected_indices]
 # Now bin these samples for multi-class
-multi_bins = [1, 10, 100, 1000, float('inf')]
+multi_bins = [10, 100, 1000, float('inf')]
 multi_labels = list(range(len(multi_bins)-1))
 multi_classes = np.digitize(selected_targets, multi_bins, right=False) - 1
 keep_indices = np.where(np.isin(multi_classes, [0, 1, 2]))[0]
