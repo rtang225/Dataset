@@ -12,8 +12,8 @@ from collections import Counter
 import seaborn as sns
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-sequences = np.load('week_sequences.npy', allow_pickle=True)
-targets = np.load('week_targets.npy', allow_pickle=True)
+sequences = np.load('week_sequences_combined.npy', allow_pickle=True)
+targets = np.load('week_targets_combined.npy', allow_pickle=True)
 
 # Replace NaN values in sequences and targets with 0.0
 sequences = [np.nan_to_num(s, nan=0.0) for s in sequences]
@@ -32,8 +32,7 @@ for i in range(len(remove)):
 # Bin targets into classes (example: 4 classes)
 # bins = [0, 0.1, 1, 10, float('inf')]
 bins = [0, 1, 10, 100, float('inf')]
-bins = [0, 10, 100, 1000, float('inf')]
-# bins = [0, 10, float('inf')]
+# bins = [0, 10, 100, 1000, float('inf')]
 labels = list(range(len(bins)-1))
 target_classes = np.digitize(targets, bins, right=False) - 1
 
@@ -140,13 +139,14 @@ model = model.to(device)
 # Manual class weights (tunable)
 # manual_weights = torch.tensor([0.69, 0.925, 1.26, 1.13], dtype=torch.float32).to(device) # 0.1, 1, 10, 100
 # manual_weights = torch.tensor([0.5, 0.8, 1.35, 1.35], dtype=torch.float32).to(device) # 1, 10, 100, 1000
+manual_weights = torch.tensor([1, 1, 2, 2], dtype=torch.float32).to(device) # 1, 10, 100, 1000
 
-# criterion = nn.CrossEntropyLoss(weight=manual_weights, label_smoothing=0.1)
-criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.0005, weight_decay=1e-3)
+criterion = nn.CrossEntropyLoss(weight=manual_weights, label_smoothing=0.1)
+# criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.0001, weight_decay=1e-3)
 scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-5)
-num_epochs = 50
-warmup_steps = 500
+num_epochs = 75
+warmup_steps = 1000
 
 train_losses = []
 val_losses = []

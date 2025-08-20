@@ -21,3 +21,7 @@ week_sequences_human.npy
 week_targets_human.npy
 week_sequences_lightning.npy
 week_targets_lightning.npy
+week_sequences_combined.npy
+week_targets_combined.npy
+week_sequences_largefires.npy
+week_targets_largefires.npy
