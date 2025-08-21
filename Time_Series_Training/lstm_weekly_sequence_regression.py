@@ -97,7 +97,7 @@ class LogCoshLoss(nn.Module):
 # Training setup
 criterion = LogCoshLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
-num_epochs = 100
+num_epochs = 50
 train_losses = []
 val_losses = []
 

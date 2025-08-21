@@ -102,7 +102,7 @@ optimizer = optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
 # Training loop
 train_losses = []
 val_losses = []
-num_epochs = 10
+num_epochs = 25
 for epoch in range(num_epochs):
     model.train()
     running_loss = 0.0

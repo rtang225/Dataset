@@ -8,7 +8,7 @@ from tqdm import tqdm
 from imblearn.over_sampling import SMOTE
 
 # Load the dataset
-file_path = 'datasetreduced.csv'
+file_path = 'datasetreducedclasses.csv'
 df = pd.read_csv(file_path)
 print(df.head())
 

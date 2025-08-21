@@ -87,7 +87,7 @@ test_targets = test_targets.to(device)
 model = model.to(device)
 
 criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
 num_epochs = 25
 train_losses = []
 val_losses = []

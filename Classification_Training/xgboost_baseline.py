@@ -8,7 +8,7 @@ from tqdm import tqdm
 from imblearn.over_sampling import SMOTE
 
 # Load the dataset
-file_path = 'datasetreduced.csv'
+file_path = 'datasetreducedclasses.csv'
 df = pd.read_csv(file_path, usecols=['temperature_2m_mean','wind_speed_10m_max', 'relative_humidity_2m_mean', 'wind_speed_10m_mean', 'vapour_pressure_deficit_max', 'area_class', 'apparent_temperature_mean', 'rain_sum', 'soil_moisture_0_to_7cm_mean', 'soil_moisture_7_to_28cm_mean', 'dew_point_2m_mean'])#, 'wind_gusts_10m_max', 'wind_gusts_10m_mean', 'soil_moisture_0_to_100cm_mean', 'wet_bulb_temperature_2m_mean'])#, 'vNDVI', 'VARI'])
 print(df.head())
 
@@ -36,7 +36,7 @@ X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, 
 smote = SMOTE(random_state=42)
 X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
 
-# XGBoost parameter tuning with progress bar
+# XGBoost parameter tuning
 param_grid_xgb = {
     'n_estimators': [100, 200],
     'max_depth': [3, 5, 7],

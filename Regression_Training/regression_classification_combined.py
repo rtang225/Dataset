@@ -2,18 +2,17 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
-import matplotlib.pyplot as plt
+from sklearn.metrics import mean_squared_error, r2_score, classification_report, confusion_matrix, accuracy_score
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
+import matplotlib.pyplot as plt
 
 # Load the dataset
 file_path = 'initialexport.csv'
-df = pd.read_csv(file_path, usecols=['temperature_2m_mean','wind_speed_10m_max', 'relative_humidity_2m_mean', 'wind_speed_10m_mean', 'vapour_pressure_deficit_max', 'area', 'apparent_temperature_mean', 'vNDVI', 'VARI'])#, 'rain_sum', 'soil_moisture_0_to_7cm_mean', 'soil_moisture_7_to_28cm_mean', 'dew_point_2m_mean'])#, 'wind_gusts_10m_max', 'wind_gusts_10m_mean', 'soil_moisture_0_to_100cm_mean', 'wet_bulb_temperature_2m_mean'])#])
-print(df.head())
+df = pd.read_csv(file_path, usecols=['temperature_2m_mean','wind_speed_10m_max', 'relative_humidity_2m_mean', 'wind_speed_10m_mean', 'vapour_pressure_deficit_max', 'vNDVI', 'VARI', 'area', 'apparent_temperature_mean', 'rain_sum'])#, 'soil_moisture_0_to_7cm_mean', 'soil_moisture_7_to_28cm_mean', 'dew_point_2m_mean'])#, 'wind_gusts_10m_max', 'wind_gusts_10m_mean', 'soil_moisture_0_to_100cm_mean', 'wet_bulb_temperature_2m_mean'])
+df = pd.read_csv(file_path)
 
 # Encode non-numeric columns (except target)
 for col in df.columns:
@@ -21,8 +20,8 @@ for col in df.columns:
         df[col] = LabelEncoder().fit_transform(df[col].astype(str))
 
 # Assume 'area' is the target column (change if needed)
+y = np.log10(df['area']+1)
 X = df.drop(['area'], axis=1, errors='ignore')
-y = df['area']
 
 # Standardize features
 scaler = StandardScaler()
@@ -30,11 +29,6 @@ X_scaled = scaler.fit_transform(X)
 
 # Train/test split
 X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
-
-# Apply bins and labels to y_test only
-bins = [0, 0.1, 1.0, 10, 100, 1000, 10000, 100000, float('inf')]
-labels = [0, 1, 2, 3, 4, 5, 6, 7]
-y_test = pd.cut(y_test, bins=bins, labels=labels, include_lowest=True)
 
 # Convert to torch tensors
 X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
@@ -52,27 +46,39 @@ class SimpleRegressor(nn.Module):
     def __init__(self, num_features):
         super().__init__()
         self.fc1 = nn.Linear(num_features, 64)
-        self.relu1 = nn.ReLU()
+        self.elu1 = nn.ELU()
         self.fc2 = nn.Linear(64, 32)
-        self.relu2 = nn.ReLU()
-        self.fc3 = nn.Linear(32, 1)
+        self.elu2 = nn.ELU()
+        self.fc3 = nn.Linear(32, 16)
+        self.elu3 = nn.ELU()
+        self.fc4 = nn.Linear(16, 8)
+        self.elu4 = nn.ELU()
+        self.fc5 = nn.Linear(8, 1)
     def forward(self, x):
-        x = self.relu1(self.fc1(x))
-        x = self.relu2(self.fc2(x))
-        x = self.fc3(x)
+        x = self.elu1(self.fc1(x))
+        x = self.elu2(self.fc2(x))
+        x = self.elu3(self.fc3(x))
+        x = self.elu4(self.fc4(x))
+        x = self.fc5(x)
         return x
 
 num_features = X_train.shape[1]
 model = SimpleRegressor(num_features)
 
-criterion = nn.MSELoss()
-optimizer = optim.Adam(model.parameters(), lr=0.1)
+# Define log-cosh loss
+class LogCoshLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, y_pred, y_true):
+        return torch.mean(torch.log(torch.cosh(y_pred - y_true + 1e-12)))
 
-num_epochs = 20
+# Replace criterion with log-cosh loss
+criterion = nn.MSELoss()  # Using MSELoss for simplicity, can be replaced with LogCoshLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-3)
+
+num_epochs = 100
 train_losses = []
 val_losses = []
-train_accuracies = []
-val_accuracies = []
 for epoch in range(num_epochs):
     model.train()
     running_loss = 0.0
@@ -88,39 +94,68 @@ for epoch in range(num_epochs):
     # Validation
     model.eval()
     val_running_loss = 0.0
-    val_correct = 0
-    val_total = 0
     with torch.no_grad():
         for xb, yb in test_loader:
             out = model(xb)
             loss = criterion(out, yb)
             val_running_loss += loss.item() * xb.size(0)
-            preds = torch.argmax(out, dim=1)
-            val_correct += (preds == yb).sum().item()
-            val_total += yb.size(0)
-    val_loss = val_running_loss / val_total
-    val_acc = val_correct / val_total
+    val_loss = val_running_loss / len(test_loader.dataset)
     val_losses.append(val_loss)
-    val_accuracies.append(val_acc)
-    if (epoch+1) % 5 == 0 or epoch == 0:
+    if (epoch+1) % 10 == 0 or epoch == 0:
         print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
 
 # Final evaluation
 model.eval()
 with torch.no_grad():
     y_pred = model(X_test_tensor).cpu().numpy().flatten()
-    y_pred = pd.cut(y_pred, bins=bins, labels=labels, include_lowest=True)
-    print(y_test)
-    print(y_pred)
-    acc = accuracy_score(y_test, y_pred)
-    print(f'Test accuracy: {acc:.3f}')
-    # Confusion matrix and classification report
-    cm = confusion_matrix(y_test, y_pred)
-    print('Confusion Matrix:')
-    print(cm)
-    print('Classification Report:')
-    print(classification_report(y_test, y_pred, digits=3))
-    print(np.bincount(y_pred))
+    y_pred_rounded = np.floor(y_pred)
+    y_pred_rounded = np.where(y_pred_rounded > 3, 3, y_pred_rounded)
+    y_pred_rounded = np.where(y_pred_rounded < 0, 0, y_pred_rounded)
+    # y_pred = np.expm1(y_pred)
+    # y_true = np.expm1(y_test)
+    y_true = y_test
+    y_true_rounded = np.floor(y_true)
+    y_true_rounded = np.where(y_true_rounded > 3, 3, y_true_rounded)
+    y_pred_rounded = np.where(y_pred_rounded < 0, 0, y_pred_rounded)
+    print(y_pred, y_true, y_pred_rounded, y_true_rounded)
+    # Regression metrics
+    mse = mean_squared_error(y_true, y_pred)
+    mse_rounded = mean_squared_error(y_true_rounded, y_pred_rounded)
+    r2 = r2_score(y_true, y_pred)
+    r2_rounded = r2_score(y_true_rounded, y_pred_rounded)
+    mae = np.mean(np.abs(y_true - y_pred))
+    mae_rounded = np.mean(np.abs(y_true_rounded - y_pred_rounded))
+    rmse = np.sqrt(mse)
+    rmse_rounded = np.sqrt(mse_rounded)
+    print(f'Final Mean Squared Error: {mse:.3f}')
+    print(f'Final Root Mean Squared Error: {rmse:.3f}')
+    print(f'Final Mean Absolute Error: {mae:.3f}')
+    print(f'Final R^2 Score: {r2:.3f}')
+
+    # Classification metrics for rounded values
+    print('Classification Report (Rounded):')
+    print(classification_report(y_true_rounded, y_pred_rounded, digits=3))
+    print('Confusion Matrix (Rounded):')
+    print(confusion_matrix(y_true_rounded, y_pred_rounded))
+    acc = accuracy_score(y_true_rounded, y_pred_rounded)
+    print(f'Accuracy (Rounded): {acc:.3f}')
+    # List the number of data for each class in the final validation test
+    unique, counts = np.unique(y_true_rounded, return_counts=True)
+    total = len(y_true_rounded)
+    print('Number of samples per class in y_true_rounded:')
+    for u, c in zip(unique, counts):
+        percent = 100 * c / total
+        print(f'Class {int(u)}: {c} ({percent:.2f}%)')
+
+    # Scatter plot: True vs Predicted
+    plt.figure(figsize=(6,6))
+    plt.scatter(y_true, y_pred, alpha=0.5)
+    plt.plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--')
+    plt.xlabel('True Area')
+    plt.ylabel('Predicted Area')
+    plt.title('True vs Predicted Area')
+    plt.tight_layout()
+    plt.show()
 
 # Plot training and validation loss
 plt.figure(figsize=(8,5))
