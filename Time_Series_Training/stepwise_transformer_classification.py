@@ -112,7 +112,7 @@ test_targets = test_targets.to(device)
 model = model.to(device)
 criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-3)
-num_epochs = 200
+num_epochs = 100
 warmup_steps = 750
 scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, num_epochs)
 train_losses = []

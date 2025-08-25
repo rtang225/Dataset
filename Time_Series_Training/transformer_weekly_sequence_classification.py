@@ -36,7 +36,7 @@ bins = [0, 0.1, 1, 10, float('inf')]
 labels = list(range(len(bins)-1))
 target_classes = np.digitize(targets, bins, right=False) - 1
 
-# Stratified train/val split (no oversampling)
+# Stratified train/val split
 sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
 train_idx, test_idx = next(sss.split(np.arange(len(sequences)), target_classes))
 
@@ -141,7 +141,6 @@ class FocalLoss(nn.Module):
             return focal_loss.sum()
         else:
             return focal_loss
-
 
 # Manual class weights (tunable)
 # manual_weights = torch.tensor([0.69, 0.925, 1.26, 1.13], dtype=torch.float32).to(device) # 0.1, 1, 10, 100
