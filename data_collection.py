@@ -35,7 +35,7 @@ for index, row in df.iterrows():
         "start_date": date - datetime.timedelta(days=7),
         "end_date": date,
         "hourly": ["temperature_2m", "relative_humidity_2m", "dew_point_2m", "apparent_temperature", "precipitation", "rain", "pressure_msl", "surface_pressure", "cloud_cover", "vapour_pressure_deficit", "wind_speed_10m", "wind_speed_100m", "wind_direction_10m", "wind_direction_100m", "soil_temperature_0_to_7cm", "soil_temperature_7_to_28cm", "soil_temperature_28_to_100cm", "soil_temperature_100_to_255cm", "soil_moisture_0_to_7cm", "soil_moisture_7_to_28cm", "soil_moisture_28_to_100cm", "soil_moisture_100_to_255cm", "et0_fao_evapotranspiration", "wind_gusts_10m", "cloud_cover_low", "cloud_cover_mid", "cloud_cover_high"],
-        "apikey": "14P5w4g2sL9XCSX3"
+        "apikey": None # Insert API Key Here
     }
     responses = openmeteo.weather_api(url, params=params)
     response = responses[0]
